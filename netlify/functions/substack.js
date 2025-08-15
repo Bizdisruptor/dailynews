@@ -6,7 +6,7 @@ const DEFAULT_FEED = "https://thecerfreport.substack.com/feed";
 
 const ENT = { "&lt;":"<", "&gt;":">", "&amp;":"&", "&quot;":'"', "&#39;":"'" };
 const unescapeHtml = (s="") => s.replace(/(&lt;|&gt;|&amp;|&quot;|&#39;)/g, m => ENT[m] || m);
-const stripTags     = (s="") => unescapeHtml(s).replace(/<\/?[^>]+>/g,"").replace(/\s+/g," ").trim();
+const stripTags      = (s="") => unescapeHtml(s).replace(/<\/?[^>]+>/g,"").replace(/\s+/g," ").trim();
 
 function absolutize(url, host){
   if(!url) return "";
@@ -93,10 +93,16 @@ export async function handler(event){
   try{
     const feed = event.queryStringParameters?.feed || DEFAULT_FEED;
     const pubHost = new URL(feed).host;
+    // ✅ FIX: This logic checks for "mode=archive" and skips the failing RSS step.
+    const mode = (event.queryStringParameters?.mode || 'auto').toLowerCase();
 
     let articles = [];
-    try { articles = await tryRSS(feed); }
-    catch { articles = await tryArchiveJSON(pubHost); }
+    try {
+      if (mode === 'archive') throw new Error('skip rss'); // Force archive path
+      articles = await tryRSS(feed);
+    } catch {
+      articles = await tryArchiveJSON(pubHost);
+    }
 
     return {
       statusCode: 200,
@@ -106,6 +112,9 @@ export async function handler(event){
   }catch(e){
     return {
       statusCode: 500,
-      headers: { "Content-Type":"application/json", "Access-Control-Allow-Origin":"
-
+      headers: { "Content-Type":"application/json", "Access-Control-Allow-Origin":"*" },
+      body: JSON.stringify({ status: "error", message: e.message })
+    };
+  }
+}
 
