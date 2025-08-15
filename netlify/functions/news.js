@@ -1,270 +1,262 @@
-// netlify/functions/news.js
-// Fetches news from APIs and caches the last successful result using Netlify Blobs.
-import { getStore } from "@netlify/blobs";
-
-// --- Primary Source: NewsAPI Configuration ---
-const NEWSAPI_BASE = "https://newsapi.org/v2";
-const NEWSAPI_CONFIG = {
-  world: {
-    endpoint: "top-headlines",
-    params: { language: "en", pageSize: 15, sources: "associated-press,reuters,bbc-news" }
-  },
-  tech: {
-    endpoint: "top-headlines",
-    params: { language: "en", pageSize: 12, sources: "techcrunch,the-verge,engadget,axios,ars-technica" }
-  },
-  finance: {
-    endpoint: "everything",
-    params: {
-      language: "en",
-      sortBy: "publishedAt",
-      pageSize: 12,
-      q: "(stocks OR markets OR bonds OR inflation OR fed OR earnings)",
-      domains: "reuters.com,cnbc.com,marketwatch.com,barrons.com,wsj.com,fortune.com,financialpost.com",
-      excludeDomains: "biztoc.com,the-sun.com,dailyexpress.co.uk"
-    }
-  },
-  frontpage: {
-    endpoint: "everything",
-    params: {
-      language: "en",
-      sortBy: "publishedAt",
-      pageSize: 18,
-      q: "(election OR border OR crime OR war OR trade OR tariffs OR immigration OR protest OR courts)",
-      domains: "reuters.com,apnews.com,bbc.com,cnbc.com,nypost.com,wsj.com,abcnews.go.com,nbcnews.com,foxnews.com,newsweek.com",
-      excludeDomains: "biztoc.com,the-sun.com,mirror.co.uk"
-    }
-  }
-};
-
-async function fetchFromNewsAPI(section) {
-  const cfg = NEWSAPI_CONFIG[section] || NEWSAPI_CONFIG.world;
-  const url = new URL(`${NEWSAPI_BASE}/${cfg.endpoint}`);
-  for (const [k, v] of Object.entries(cfg.params)) {
-    if (v) url.searchParams.set(k, v);
-  }
-
-  const response = await fetch(url.toString(), {
-    headers: { "X-Api-Key": process.env.NEWSAPI_KEY }
-  });
-
-  if (!response.ok) {
-    throw new Error(`NewsAPI failed with status: ${response.status}`);
-  }
-  const data = await response.json();
-  if (data.status !== 'ok' || data.totalResults === 0) {
-      throw new Error(`NewsAPI returned an error or no articles: ${data.message || 'No articles found'}`);
-  }
-  return data.articles;
-}
-
-
-// --- Fallback Source: GNews Configuration ---
-const GNEWS_BASE = "https://gnews.io/api/v4/top-headlines";
-const GNEWS_CATEGORY_MAP = {
-    world: 'world',
-    tech: 'technology',
-    finance: 'business',
-    frontpage: 'general'
-};
-
-function transformGNewsArticle(article) {
-    return {
-        title: article.title,
-        description: article.description,
-        url: article.url,
-        publishedAt: article.publishedAt
-    };
-}
-
-async function fetchFromGNews(section) {
-    const category = GNEWS_CATEGORY_MAP[section] || 'general';
-    const url = new URL(GNEWS_BASE);
-    url.searchParams.set('category', category);
-    url.searchParams.set('lang', 'en');
-    url.searchParams.set('max', 15);
-    url.searchParams.set('apikey', process.env.GNEWS_API_KEY);
-
-    const response = await fetch(url.toString());
-    if (!response.ok) {
-        throw new Error(`GNews failed with status: ${response.status}`);
-    }
-    const data = await response.json();
-    if (!data.articles || data.articles.length === 0) {
-        throw new Error('GNews returned no articles.');
-    }
-    return data.articles.map(transformGNewsArticle);
-}
-
-// --- Second Fallback: Webz.io Configuration ---
-const WEBZIO_BASE = "https://api.webz.io/newsApiLite";
-const WEBZIO_QUERY_MAP = {
-    world: '(world OR global)',
-    tech: '(technology OR tech)',
-    finance: '(finance OR business OR markets)',
-    frontpage: '(breaking OR "top stories")'
-};
-
-function transformWebzArticle(post) {
-    return {
-        title: post.title,
-        description: post.text.slice(0, 200) + '...',
-        url: post.url,
-        publishedAt: post.published
-    };
-}
-
-async function fetchFromWebz(section) {
-    const query = WEBZIO_QUERY_MAP[section] || 'news';
-    const url = new URL(WEBZIO_BASE);
-    url.searchParams.set('token', process.env.WEBZIO_API_KEY);
-    url.searchParams.set('q', query);
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>The Cerf Report — Curated News</title>
+  <style>
+    :root { --blue:#0056b3; --ink:#1c1e21; --muted:#606770; --paper:#fff; --bg:#f0f2f5; --positive: #28a745; --negative: #dc3545; }
+    * { box-sizing:border-box }
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink);margin:0;padding:20px}
+    h1{text-align:center;color:var(--blue);margin:0 0 8px}
+    .subhead{text-align:center;color:var(--muted);margin:0 0 22px;font-size:.95rem}
     
-    const response = await fetch(url.toString());
-    if (!response.ok) {
-        throw new Error(`Webz.io failed with status: ${response.status}`);
+    .market-ticker {
+        background: var(--paper);
+        border-radius: 12px;
+        padding: 15px;
+        margin-bottom: 20px;
+        box-shadow: 0 2px 6px rgba(0,0,0,.08);
     }
-    const data = await response.json();
-    if (!data.posts || data.posts.length === 0) {
-        throw new Error('Webz.io returned no articles.');
+    .market-indices {
+        display: flex;
+        justify-content: space-around;
+        flex-wrap: wrap;
+        gap: 20px;
+        padding-bottom: 15px;
+        border-bottom: 1px solid #eee;
+        margin-bottom: 15px;
     }
-    return data.posts.map(transformWebzArticle);
-}
-
-// --- Third Fallback: Polygon.io Configuration ---
-const POLYGON_BASE = "https://api.polygon.io/v2/reference/news";
-
-function transformPolygonArticle(article) {
-    return {
-        title: article.title,
-        description: article.description,
-        url: article.article_url,
-        publishedAt: article.published_utc
-    };
-}
-
-async function fetchFromPolygon() {
-    const url = new URL(POLYGON_BASE);
-    url.searchParams.set('limit', 20);
-    url.searchParams.set('apiKey', process.env.POLYGON_API_KEY);
-
-    const response = await fetch(url.toString());
-    if (!response.ok) {
-        throw new Error(`Polygon.io failed with status: ${response.status}`);
+    .index-quote { text-align: center; }
+    .index-quote .name { font-weight: 600; font-size: 1rem; color: var(--ink); }
+    .index-quote .price { font-size: 1.1rem; font-weight: 500; margin: 2px 0; }
+    .index-quote .change { font-size: 0.9rem; }
+    .market-movers {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 20px;
     }
-    const data = await response.json();
-    if (!data.results || data.results.length === 0) {
-        throw new Error('Polygon.io returned no articles.');
+    .mover-category h3 {
+        margin: 0 0 8px;
+        font-size: 0.9rem;
+        color: var(--blue);
+        text-transform: uppercase;
     }
-    return data.results.map(transformPolygonArticle);
-}
+    .mover-list { font-size: 0.85rem; }
+    .mover-list div { display: flex; justify-content: space-between; padding: 2px 0; }
+    .mover-list .ticker { font-weight: 600; }
+    .positive { color: var(--positive); }
+    .negative { color: var(--negative); }
 
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:20px}
+    .card{background:var(--paper);border-radius:12px;box-shadow:0 2px 6px rgba(0,0,0,.08);padding:18px;overflow:hidden}
+    .card h2{margin:0 0 6px;border-bottom:2px solid var(--blue);padding-bottom:8px;font-size:1.15rem}
+    .section-link{margin:-2px 0 10px}
+    .section-link a{font-size:.92rem;text-decoration:none}
+    .section-link a:hover{text-decoration:underline}
+    .list{max-height:520px;overflow-y:auto;padding-right:10px; min-height: 100px;}
+    .item{margin:0 0 14px;border-bottom:1px solid #eee;padding:0 0 12px}
+    .item:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0}
+    .item a{color:#0d6efd;text-decoration:none;font-weight:600}
+    .item a:hover{text-decoration:underline}
+    .item p{margin:6px 0 0;color:var(--muted);font-size:.92rem;line-height:1.35}
+    .loading{text-align:center;padding:16px;color:var(--muted);line-height:1.4;}
+    .footer{margin-top:18px;text-align:center;color:#8a8f98;font-size:.85rem}
+  </style>
+</head>
+<body>
+  <h1>The Cerf Report — Curated News</h1>
+  <div class="subhead">News minus the junk. Tech, finance, and interesting stuff.</div>
 
-// --- Fourth Fallback: Finnhub Configuration (for Finance only) ---
-const FINNHUB_BASE = "https://finnhub.io/api/v1/news";
+  <div class="market-ticker" id="market-ticker">
+    <div class="loading">Loading Market Data…</div>
+  </div>
 
-function transformFinnhubArticle(article) {
-    return {
-        title: article.headline,
-        description: article.summary,
-        url: article.url,
-        publishedAt: new Date(article.datetime * 1000).toISOString()
-    };
-}
+  <div class="grid">
+    <div class="card" id="front-card">
+      <h2>Front Page</h2>
+      <div class="list"><div class="loading">Loading…</div></div>
+    </div>
+    <div class="card" id="tech-card">
+      <h2>Technology</h2>
+      <div class="list"><div class="loading">Loading…</div></div>
+    </div>
+    <div class="card" id="world-card">
+      <h2>World News</h2>
+      <div class="list"><div class="loading">Loading…</div></div>
+    </div>
+    <div class="card" id="finance-card">
+      <h2>Finance</h2>
+      <div class="list"><div class="loading">Loading…</div></div>
+    </div>
+    <div class="card" id="cerf-card">
+      <h2>The Cerf Report</h2>
+      <div class="section-link">
+        <a href="https://thecerfreport.substack.com/" target="_blank" rel="noopener noreferrer">
+          thecerfreport.substack.com →
+        </a>
+      </div>
+      <div class="list"><div class="loading">Loading…</div></div>
+    </div>
+  </div>
 
-async function fetchFromFinnhub() {
-    const url = new URL(FINNHUB_BASE);
-    url.searchParams.set('category', 'general');
-    url.searchParams.set('token', process.env.FINNHUB_API_KEY);
+  <div class="footer" id="updatedAt"></div>
 
-    const response = await fetch(url.toString());
-    if (!response.ok) {
-        throw new Error(`Finnhub failed with status: ${response.status}`);
-    }
-    const data = await response.json();
-    if (!data || data.length === 0) {
-        throw new Error('Finnhub returned no articles.');
-    }
-    return data.slice(0, 15).map(transformFinnhubArticle);
-}
+  <script>
+    const sections = [
+      { id: "front-card",   section: "frontpage" },
+      { id: "tech-card",    section: "tech" },
+      { id: "world-card",   section: "world" },
+      { id: "finance-card", section: "finance" },
+    ];
 
+    const $ = (sel, root = document) => root.querySelector(sel);
 
-// --- Main Handler with Fallback and Caching Logic ---
-export async function handler(event) {
-  const section = (event.queryStringParameters?.section || "world").toLowerCase();
-  const cache = getStore('news-cache');
-
-  let articles;
-  let source = 'unknown';
-
-  try {
-    articles = await fetchFromNewsAPI(section);
-    source = 'NewsAPI';
-  } catch (primaryError) {
-    console.warn(`Primary source (NewsAPI) failed for '${section}': ${primaryError.message}. Trying GNews...`);
-    try {
-      articles = await fetchFromGNews(section);
-      source = 'GNews';
-    } catch (gnewsError) {
-      console.warn(`GNews fallback also failed for '${section}': ${gnewsError.message}. Trying Webz.io...`);
-      try {
-        articles = await fetchFromWebz(section);
-        source = 'Webz.io';
-      } catch (webzError) {
-        console.warn(`Webz.io fallback also failed for '${section}': ${webzError.message}. Trying Polygon.io...`);
-        try {
-            articles = await fetchFromPolygon();
-            source = 'Polygon.io';
-        } catch (polygonError) {
-            console.warn(`Polygon.io fallback also failed for '${section}': ${polygonError.message}.`);
-            if (section === 'finance') {
-              console.log("Trying Finnhub as final fallback for 'finance'...");
-              try {
-                articles = await fetchFromFinnhub();
-                source = 'Finnhub';
-              } catch (finnhubError) {
-                console.error(`All API sources failed for '${section}'. Attempting to load from cache.`);
-                return await loadFromCache(cache, section, finnhubError);
-              }
-            } else {
-                console.error(`All API sources failed for '${section}'. Attempting to load from cache.`);
-                return await loadFromCache(cache, section, polygonError);
-            }
+    function render(listEl, articles) {
+      // ✅ FIX: Only update the list if the fetch was successful and returned articles.
+      // If 'articles' is null or empty, this function will now do nothing, preserving old content.
+      if (articles && articles.length > 0) {
+        listEl.innerHTML = ""; // Clear old content
+        for (const a of articles) {
+          if (!a || !a.title) continue;
+          const div = document.createElement("div");
+          div.className = "item";
+          div.innerHTML = `
+            <a href="${a.url}" target="_blank" rel="noopener noreferrer">${a.title}</a>
+            <p>${a.description ? a.description : ""}</p>
+          `;
+          listEl.appendChild(div);
+        }
+      } else {
+        // If the list is currently showing "Loading...", but the fetch failed,
+        // show the "Could not load" message. Otherwise, leave old content.
+        if (listEl.innerHTML.includes('loading')) {
+            listEl.innerHTML = '<div class="loading">Could not load news at this time.</div>';
         }
       }
     }
-  }
 
-  // If we successfully fetched from any API, save the result to the cache
-  if (articles && articles.length > 0) {
-    await cache.set(`${section}-articles`, articles);
-    console.log(`Successfully fetched ${articles.length} articles from ${source} and updated cache for '${section}'.`);
-  }
-
-  return {
-    statusCode: 200,
-    headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-    body: JSON.stringify({ status: "ok", articles, source })
-  };
-}
-
-async function loadFromCache(cache, section, finalError) {
-    const cachedArticles = await cache.get(`${section}-articles`, { type: 'json' });
-    if (cachedArticles) {
-        console.log(`Successfully loaded ${cachedArticles.length} articles from cache for '${section}'.`);
-        return {
-            statusCode: 200,
-            headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-            body: JSON.stringify({ status: "ok", articles: cachedArticles, source: 'cache' })
-        };
+    async function fetchMarketData() {
+        const url = '/.netlify/functions/market-data';
+        try {
+            const r = await fetch(url);
+            if (!r.ok) throw new Error(`Market data fetch failed: ${r.status}`);
+            const response = await r.json();
+            if (response.status !== 'ok') throw new Error(response.message);
+            return response.data;
+        } catch (e) {
+            console.error("Failed to fetch market data:", e);
+            return null;
+        }
     }
-    // If cache is also empty, return the final error
-    return {
-        statusCode: 500,
-        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-        body: JSON.stringify({ status: "error", message: finalError.message })
-    };
-}
+
+    function renderMarketData(data) {
+        const container = $('#market-ticker');
+        if (!data) {
+            container.innerHTML = '<div class="loading">Could not load market data.</div>';
+            return;
+        }
+
+        const formatChange = (change, percentChange) => {
+            const value = change ? change.toFixed(2) : '0.00';
+            const percent = percentChange ? percentChange.toFixed(2) : '0.00';
+            const sign = change >= 0 ? '+' : '';
+            const className = change >= 0 ? 'positive' : 'negative';
+            return `<span class="${className}">${sign}${value} (${sign}${percent}%)</span>`;
+        };
+        
+        const indicesHtml = data.indices.map(idx => `
+            <div class="index-quote">
+                <div class="name">${idx.name}</div>
+                <div class="price">${idx.c ? idx.c.toFixed(2) : 'N/A'}</div>
+                <div class="change">${formatChange(idx.d, idx.dp)}</div>
+            </div>
+        `).join('');
+
+        const moversHtml = Object.entries(data.movers).map(([category, stocks]) => `
+            <div class="mover-category">
+                <h3>${category}</h3>
+                <div class="mover-list">
+                    ${stocks.map(stock => `
+                        <div>
+                            <span class="ticker">${stock.ticker}</span>
+                            <span class="change">${formatChange(stock.d, stock.dp)}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `).join('');
+
+        container.innerHTML = `
+            <div class="market-indices">${indicesHtml}</div>
+            <div class="market-movers">${moversHtml}</div>
+        `;
+    }
+
+    async function fetchNews(section) {
+      const url = `/.netlify/functions/news?section=${encodeURIComponent(section)}`;
+      try {
+        const r = await fetch(url);
+        if (!r.ok) throw new Error(`News ${section} HTTP ${r.status}`);
+        const data = await r.json();
+        // Return null if status is not 'ok' or no articles, so render() knows to keep old content.
+        if (data.status !== 'ok' || !data.articles || data.articles.length === 0) return null;
+        return data.articles;
+      } catch {
+        return null; // Return null on any error
+      }
+    }
+
+    async function fetchCerf() {
+      const url = '/.netlify/functions/substack?mode=archive';
+      try {
+        const r = await fetch(url);
+        if (!r.ok) throw new Error('Substack fetch failed');
+        const data = await r.json().catch(() => ({}));
+        if (data.status !== 'ok' || !Array.isArray(data.articles)) {
+          throw new Error('Invalid Substack data');
+        }
+        return (data.articles || []).map(a => ({
+          title: a.title || "Untitled",
+          url: a.url,
+          description: a.description || ''
+        }));
+      } catch (e) {
+        console.error(e);
+        return null;
+      }
+    }
+
+    async function updateAll() {
+      // ✅ FIX: Don't clear content here. Just fetch and let render() decide.
+      // A small visual indicator that an update is happening.
+      const footer = $("#updatedAt");
+      const originalFooterText = footer.textContent;
+      footer.textContent = "Updating...";
+
+      const results = await Promise.all([
+        ...sections.map(s => fetchNews(s.section)),
+        fetchCerf(),
+      ]);
+
+      sections.forEach((s, i) => render($(`#${s.id} .list`), results[i]));
+      render($("#cerf-card .list"), results[sections.length]);
+
+      // Restore footer text or set new time.
+      footer.textContent = "Updated " + new Date().toLocaleString();
+    }
+
+    document.addEventListener("DOMContentLoaded", async () => {
+      const marketData = await fetchMarketData();
+      renderMarketData(marketData);
+      
+      updateAll();
+      setInterval(updateAll, 5 * 60 * 1000);
+    });
+  </script>
+</body>
+</html>
+
 
 
 
