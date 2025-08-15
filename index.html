@@ -5,44 +5,48 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>The Cerf Report — Curated News</title>
   <style>
-    :root {
+    :root{
       --blue:#0056b3; --ink:#1c1e21; --muted:#606770; --paper:#fff; --bg:#f0f2f5;
       --positive:#1a7f37; --negative:#c62828;
     }
     *{box-sizing:border-box}
     body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink);margin:0;padding:20px}
     h1{text-align:center;color:var(--blue);margin:0 0 8px}
-    .subhead{text-align:center;color:var(--muted);margin:0 0 22px;font-size:.95rem}
+    .subhead{text-align:center;color:var(--muted);margin:0 0 18px;font-size:.95rem}
 
-    /* Market header */
-    .market-ticker{background:var(--paper);border-radius:12px;padding:15px;margin-bottom:20px;box-shadow:0 2px 6px rgba(0,0,0,.08)}
-    .market-indices{display:flex;justify-content:space-around;flex-wrap:wrap;gap:20px;padding-bottom:15px;border-bottom:1px solid #eee;margin-bottom:15px}
-    .index-quote{text-align:center}
-    .index-quote .name{font-weight:600;font-size:1rem;color:var(--ink)}
-    .index-quote .price{font-size:1.1rem;font-weight:500;margin:2px 0}
-    .index-quote .change{font-size:.9rem}
+    /* Market header — tighter layout */
+    .market-ticker{background:var(--paper);border-radius:12px;padding:12px 14px;margin-bottom:16px;box-shadow:0 1px 4px rgba(0,0,0,.06)}
+    .row{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center}
+    .row + .row{margin-top:10px;padding-top:10px;border-top:1px solid #eee}
+    .q{display:flex;gap:8px;align-items:baseline}
+    .q a{color:inherit;text-decoration:none;font-weight:600}
+    .q a:hover{text-decoration:underline;color:var(--blue)}
+    .q .price{font-variant-numeric:tabular-nums;font-weight:600}
+    .q .chg{font-variant-numeric:tabular-nums}
     .positive{color:var(--positive)} .negative{color:var(--negative)}
-    .market-movers{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px 20px}
-    .mover-category h3{margin:0 0 5px;font-size:.85rem;color:var(--blue);text-transform:uppercase;letter-spacing:.5px}
-    .mover-list{font-size:.85rem}
-    .mover-list div{display:flex;justify-content:space-between;padding:1px 0}
-    .market-ticker a{color:inherit;text-decoration:none}
-    .market-ticker a:hover{text-decoration:underline;color:var(--blue)}
 
-    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:20px}
-    .card{background:var(--paper);border-radius:12px;box-shadow:0 2px 6px rgba(0,0,0,.08);padding:18px;overflow:hidden}
-    .card h2{margin:0 0 6px;border-bottom:2px solid var(--blue);padding-bottom:8px;font-size:1.15rem}
+    /* Movers grid */
+    .movers{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px 16px;margin-top:6px}
+    .mcat h3{margin:0 0 4px;font-size:.82rem;color:var(--blue);text-transform:uppercase;letter-spacing:.4px}
+    .mlist{display:grid;grid-template-columns:1fr auto;gap:2px 8px;font-size:.9rem}
+    .mlist .sym a{font-weight:600;color:inherit;text-decoration:none}
+    .mlist .sym a:hover{color:var(--blue);text-decoration:underline}
+
+    /* Cards */
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px}
+    .card{background:var(--paper);border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.06);padding:16px;overflow:hidden}
+    .card h2{margin:0 0 6px;border-bottom:2px solid var(--blue);padding-bottom:8px;font-size:1.1rem}
     .section-link{margin:-2px 0 10px}
     .section-link a{font-size:.92rem;text-decoration:none}
     .section-link a:hover{text-decoration:underline}
     .list{max-height:520px;overflow-y:auto;padding-right:10px;min-height:100px}
-    .item{margin:0 0 14px;border-bottom:1px solid #eee;padding:0 0 12px}
+    .item{margin:0 0 12px;border-bottom:1px solid #eee;padding:0 0 10px}
     .item:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0}
     .item a{color:#0d6efd;text-decoration:none;font-weight:600}
     .item a:hover{text-decoration:underline}
     .item p{margin:6px 0 0;color:var(--muted);font-size:.92rem;line-height:1.35}
-    .loading{text-align:center;padding:16px;color:var(--muted);line-height:1.4}
-    .footer{margin-top:18px;text-align:center;color:#8a8f98;font-size:.85rem}
+    .loading{text-align:center;padding:12px;color:var(--muted);line-height:1.4}
+    .footer{margin-top:14px;text-align:center;color:#8a8f98;font-size:.85rem}
   </style>
 </head>
 <body>
@@ -54,6 +58,7 @@
     <div class="loading">Loading market data…</div>
   </div>
 
+  <!-- News grid -->
   <div class="grid">
     <div class="card" id="front-card">
       <h2>Front Page</h2>
@@ -125,37 +130,61 @@
       listEl.appendChild(frag);
     }
 
+    // --- Market rendering ---
+    function fmtNum(n, d=2){ return (n==null || isNaN(n)) ? "N/A" : Number(n).toFixed(d); }
+    function fmtChg(d,dp){
+      const sign = (d??0) >= 0 ? '+' : '';
+      const cls = (d??0) >= 0 ? 'positive' : 'negative';
+      return `<span class="chg ${cls}">${sign}${fmtNum(d,2)} (${sign}${fmtNum(dp,2)}%)</span>`;
+    }
+    function priceFor(ticker, c){
+      if (ticker === "^TNX") { // Yahoo ^TNX is yield*10
+        if (c==null) return "N/A";
+        return (Number(c)/10).toFixed(2) + "%";
+      }
+      const dec = /-USD$/.test(ticker) ? 0 : (/=F$/.test(ticker) ? 2 : 2);
+      return fmtNum(c, dec);
+    }
+    function link(sym){ return `https://finance.yahoo.com/quote/${encodeURIComponent(sym)}`; }
+
     function renderMarketData(data){
-      const container = $('#market-ticker');
-      if (!data) return;
-      const fmtChg = (d,dp)=>{
-        const sign = (d??0) >= 0 ? '+' : '';
-        const cls = (d??0) >= 0 ? 'positive' : 'negative';
-        return `<span class="${cls}">${sign}${(d??0).toFixed(2)} (${sign}${(dp??0).toFixed(2)}%)</span>`;
-      };
-      const idx = (data.indices||[]).map(x=>`
-        <div class="index-quote">
-          <div class="name"><a href="https://finance.yahoo.com/quote/${x.ticker}" target="_blank" rel="noopener noreferrer">${x.name||x.ticker}</a></div>
-          <div class="price">${x.c!=null ? x.c.toFixed(2) : 'N/A'}</div>
-          <div class="change">${fmtChg(x.d,x.dp)}</div>
+      const el = $('#market-ticker');
+      if (!data) { setError(el, 'Could not load market data.'); return; }
+
+      const macro = (data.macro||[]).map(x=>`
+        <div class="q">
+          <a href="${link(x.ticker)}" target="_blank" rel="noopener noreferrer">${x.name||x.ticker}</a>
+          <span class="price">${priceFor(x.ticker, x.c)}</span>
+          ${fmtChg(x.d,x.dp)}
         </div>
       `).join('');
+
+      const indices = (data.indices||[]).map(x=>`
+        <div class="q">
+          <a href="${link(x.ticker)}" target="_blank" rel="noopener noreferrer">${x.name||x.ticker}</a>
+          <span class="price">${priceFor(x.ticker, x.c)}</span>
+          ${fmtChg(x.d,x.dp)}
+        </div>
+      `).join('');
+
       const movers = Object.entries(data.movers||{}).map(([cat,items])=>`
-        <div class="mover-category">
+        <div class="mcat">
           <h3>${cat.toUpperCase()}</h3>
-          <div class="mover-list">
+          <div class="mlist">
             ${(items||[]).map(s=>`
-              <div>
-                <span class="ticker"><a href="https://finance.yahoo.com/quote/${s.ticker}" target="_blank" rel="noopener noreferrer">${s.ticker}</a></span>
-                <span class="change">${fmtChg(s.d,s.dp)}</span>
+              <div class="sym">
+                <a href="${link(s.ticker)}" target="_blank" rel="noopener noreferrer">${s.ticker}</a>
               </div>
+              <div class="chgwrap">${fmtChg(s.d,s.dp)}</div>
             `).join('')}
           </div>
         </div>
       `).join('');
-      container.innerHTML = `
-        <div class="market-indices">${idx}</div>
-        <div class="market-movers">${movers}</div>
+
+      el.innerHTML = `
+        <div class="row">${macro}</div>
+        <div class="row">${indices}</div>
+        <div class="movers">${movers}</div>
       `;
     }
 
@@ -172,7 +201,6 @@
       const r = await fetch(`/.netlify/functions/news?section=${encodeURIComponent(section)}`);
       if (!r.ok) throw new Error(`news ${section} ${r.status}`);
       const data = await r.json();
-      // lenient shape
       const articles = Array.isArray(data?.articles) ? data.articles
                     : Array.isArray(data?.data?.articles) ? data.data.articles
                     : [];
@@ -192,12 +220,12 @@
       }));
     }
 
-    /* ---------------- update flow (cache-first + error on first-fail) ---------------- */
+    /* ---------------- update flow ---------------- */
     async function updateAll(){
       const footer = $("#updatedAt");
       footer.textContent = "Updating…";
 
-      // 1) render from cache first (prevents blanks)
+      // Cache-first render to avoid blanks
       const cachedMarket = cache.get("market.data");
       if (cachedMarket) renderMarketData(cachedMarket);
 
@@ -211,14 +239,14 @@
       const haveCerfCache = !!cachedCerf;
       if (cachedCerf) render($("#cerf-card .list"), cachedCerf, true);
 
-      // 2) fetch fresh in parallel
+      // Fetch fresh in parallel
       const fresh = await Promise.allSettled([
         fetchMarket(),
         ...sections.map(s=>fetchNews(s.section)),
         fetchCerf()
       ]);
 
-      // market
+      // Market
       if (fresh[0].status==="fulfilled"){
         renderMarketData(fresh[0].value);
         cache.set("market.data", fresh[0].value);
@@ -227,7 +255,7 @@
         console.error('Market fetch failed:', fresh[0].reason);
       }
 
-      // sections
+      // Sections
       sections.forEach((s, i)=>{
         const res = fresh[i+1];
         const el = $(`#${s.id} .list`);
@@ -240,7 +268,7 @@
         }
       });
 
-      // cerf
+      // Cerf
       const cerfRes = fresh[1+sections.length];
       const cerfEl = $("#cerf-card .list");
       if (cerfRes.status==="fulfilled" && Array.isArray(cerfRes.value) && cerfRes.value.length){
@@ -256,7 +284,7 @@
 
     document.addEventListener("DOMContentLoaded", ()=>{
       updateAll();
-      setInterval(updateAll, 5*60*1000); // refresh every 5 min
+      setInterval(updateAll, 5*60*1000);
     });
   </script>
 </body>
