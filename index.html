@@ -22,7 +22,7 @@
     .item a{color:#0d6efd;text-decoration:none;font-weight:600}
     .item a:hover{text-decoration:underline}
     .item p{margin:6px 0 0;color:var(--muted);font-size:.92rem;line-height:1.35}
-    .loading{text-align:center;padding:16px;color:var(--muted)}
+    .loading{text-align:center;padding:16px;color:var(--muted);line-height:1.4;}
     .footer{margin-top:18px;text-align:center;color:#8a8f98;font-size:.85rem}
   </style>
 </head>
@@ -57,8 +57,116 @@
         <a href="https://thecerfreport.substack.com/" target="_blank" rel="noopener noreferrer">
           thecerfreport.substack.com →
         </a>
-      </d
+      </div>
+      <div class="list"></div>
+    </div>
+  </div>
 
+  <div class="footer" id="updatedAt"></div>
+
+  <script>
+    const sections = [
+      { id: "front-card",   section: "frontpage" },
+      { id: "tech-card",    section: "tech" },
+      { id: "world-card",   section: "world" },
+      { id: "finance-card", section: "finance" },
+    ];
+
+    const $ = (sel, root = document) => root.querySelector(sel);
+
+    function render(listEl, articles) {
+      listEl.innerHTML = "";
+      if (!articles || !articles.length) {
+        // Only set a generic error if a specific one wasn't already placed by the fetch function.
+        if (!listEl.innerHTML.includes('error')) {
+           listEl.innerHTML = '<div class="loading">Could not load news at this time.</div>';
+        }
+        return;
+      }
+      for (const a of articles) {
+        if (!a || a.title === "[Removed]") continue;
+        const div = document.createElement("div");
+        div.className = "item";
+        div.innerHTML = `
+          <a href="${a.url}" target="_blank" rel="noopener noreferrer">${a.title}</a>
+          <p>${a.description ? a.description : ""}</p>
+        `;
+        listEl.appendChild(div);
+      }
+    }
+
+    async function fetchNews(section) {
+      const url = `/.netlify/functions/news?section=${encodeURIComponent(section)}`;
+      try {
+        const r = await fetch(url);
+        if (!r.ok) throw new Error(`News ${section} HTTP ${r.status}`);
+        const data = await r.json();
+        return data.articles || [];
+      } catch {
+        return [];
+      }
+    }
+
+    async function fetchCerf() {
+      const box = $('#cerf-card .list');
+      const url = '/.netlify/functions/substack?feed=https://thecerfreport.substack.com/feed';
+      try {
+        const r = await fetch(url);
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok || data.status !== 'ok' || !Array.isArray(data.articles)) {
+          throw new Error((data && data.message) ? data.message : ('HTTP ' + r.status));
+        }
+        const toTitle = (a) => {
+          if (a.title && a.title.trim()) return a.title.trim();
+          if (a.description && a.description.trim()) {
+            const t = a.description.replace(/\s+/g, ' ').trim();
+            return t.length > 90 ? t.slice(0, 89) + '…' : t;
+          }
+          try {
+            const u = new URL(a.url);
+            const slug = decodeURIComponent(u.pathname.split('/').filter(Boolean).pop() || '');
+            return slug ? slug.replace(/[-_]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : 'Read on Substack';
+          } catch { return 'Read on Substack'; }
+        };
+        return (data.articles || []).map(a => ({
+          title: toTitle(a),
+          url: a.url,
+          description: a.description || ''
+        }));
+      } catch (e) {
+        if (box) {
+          box.innerHTML = `
+            <div class="loading">
+              <span style="color: #c00; font-weight: bold;">Substack error:</span> ${String(e.message || e).slice(0, 140)}
+              <br>— <a href="https://thecerfreport.substack.com/" target="_blank" rel="noopener noreferrer">open feed directly</a>
+            </div>`;
+        }
+        return [];
+      }
+    }
+
+    async function updateAll() {
+      for (const s of sections) { $(`#${s.id} .list`).innerHTML = '<div class="loading">Loading…</div>'; }
+      $("#cerf-card .list").innerHTML = '<div class="loading">Loading…</div>';
+
+      const results = await Promise.all([
+        ...sections.map(s => fetchNews(s.section).catch(() => [])),
+        fetchCerf()
+      ]);
+
+      sections.forEach((s, i) => render($(`#${s.id} .list`), results[i]));
+      render($("#cerf-card .list"), results[results.length - 1]);
+
+      $("#updatedAt").textContent = "Updated " + new Date().toLocaleString();
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+      updateAll();
+      setInterval(updateAll, 5 * 60 * 1000);
+    });
+  </script>
+</body>
+</html>
 
 
 
