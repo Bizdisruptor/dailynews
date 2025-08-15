@@ -1,72 +1,46 @@
-// netlify/functions/market-data.js  (CommonJS)
-// Key-free market data using Yahoo Finance + /tmp cache fallback.
-// Structure returned:
-// { status:"ok", data: { macro:[...], indices:[...], ai:[...], crypto:[...], energy:[...] }, source:"live|cache" }
+// netlify/functions/market-data.js (CommonJS)
+// Aggregates quotes from Yahoo Finance and returns macro + sector movers.
+// Falls back to cached data in /tmp so the page never goes blank.
 
 const HEADERS = {
   "Content-Type": "application/json",
   "Access-Control-Allow-Origin": "*",
 };
 
-const CACHE_PATH = "/tmp/market-data-cache.json";
-const TTL_MS = 3 * 60 * 1000; // 3 minutes
+const CACHE_FILE = "/tmp/market-data-cache.json";
 
-// ---- Friendly name helpers ----
-const FRIENDLY = {
-  "^DJI": "Dow Jones",
-  "^GSPC": "S&P 500",
-  "^IXIC": "NASDAQ",
-  "SPY": "S&P 500",
-  "QQQ": "NASDAQ 100",
-  "DIA": "Dow Jones",
+// ----- Symbol sets -----------------------------------------------------------
 
-  "BTC-USD": "Bitcoin",
-  "GC=F": "Gold",
-  "^TNX": "10Y Treasury",
-  "DX-Y.NYB": "US Dollar Index",
-  "^VIX": "VIX",
+// Macro bar: Bitcoin, Gold futures, 10-year Treasury yield (^TNX)
+const MACRO = ["BTC-USD", "GC=F", "^TNX"];
 
-  "NVDA": "NVDA",
-  "MSFT": "MSFT",
-  "GOOG": "GOOG",
-  "AMD": "AMD",
-  "SMCI": "SMCI",
-  "AVGO": "AVGO",
-  "META": "META",
-  "TSLA": "TSLA",
-  "AAPL": "AAPL",
-  "PLTR": "PLTR",
+// Major indices (use ^DJI ^GSPC ^IXIC which Yahoo provides without keys)
+const INDICES = ["^DJI", "^GSPC", "^IXIC"];
 
-  "COIN": "COIN",
-  "MSTR": "MSTR",
-  "MARA": "MARA",
-  "RIOT": "RIOT",
-  "CLSK": "CLSK",
+// Buckets for the grid (each item is a Yahoo symbol)
+const AI = ["NVDA", "MSFT", "AAPL", "GOOGL", "AMD", "SMCI", "AVGO", "META", "TSLA", "PLTR"];
+const CRYPTO = ["COIN", "MSTR", "MARA", "RIOT", "CLSK"];
+const ENERGY = ["XOM", "CVX", "SLB", "OXY", "COP"];
 
-  "XOM": "XOM",
-  "CVX": "CVX",
-  "SLB": "SLB",
-  "OXY": "OXY",
-  "COP": "COP",
-};
+// ----- Helpers ---------------------------------------------------------------
 
-// ---- What we’ll fetch ----
-const SYMBOLS = {
-  // macro bar at the very top
-  macro: ["BTC-USD", "GC=F", "^TNX", "DX-Y.NYB", "^VIX"],
-  // headline indices
-  indices: ["^DJI", "^GSPC", "^IXIC", "DIA", "SPY", "QQQ"], // we’ll filter whichever returns
-  ai: ["NVDA", "MSFT", "GOOG", "AMD", "SMCI", "AVGO", "META", "TSLA", "AAPL", "PLTR"],
-  crypto: ["COIN", "MSTR", "MARA", "RIOT", "CLSK"],
-  energy: ["XOM", "CVX", "SLB", "OXY", "COP"],
-};
+function pickFields(q) {
+  // Normalize to the shape the front-end expects
+  return {
+    ticker: q.symbol,
+    name: q.shortName || q.longName || q.symbol,
+    c: q.regularMarketPrice,                    // current
+    d: q.regularMarketChange,                   // change
+    dp: q.regularMarketChangePercent,           // % change
+    t: q.regularMarketTime || q.postMarketTime || q.preMarketTime || null,
+  };
+}
 
-// ---- Yahoo fetch ----
-async function fetchYahooQuoteMap(symbols) {
+async function yahooQuotes(symbols) {
   const url =
     "https://query1.finance.yahoo.com/v7/finance/quote?symbols=" +
     encodeURIComponent(symbols.join(","));
-  const r = await fetch(url, {
+  const res = await fetch(url, {
     headers: {
       "User-Agent":
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
@@ -74,95 +48,78 @@ async function fetchYahooQuoteMap(symbols) {
     },
     redirect: "follow",
   });
-  if (!r.ok) throw new Error(`Yahoo HTTP ${r.status}`);
-  const data = await r.json();
-  const rows = data?.quoteResponse?.result || [];
-  const map = new Map();
-  for (const q of rows) {
-    map.set(q.symbol, q);
-  }
-  return map;
+  if (!res.ok) throw new Error(`Yahoo HTTP ${res.status}`);
+  const json = await res.json();
+  const rows = json?.quoteResponse?.result || [];
+  return rows.map(pickFields);
 }
 
-function pickQuotes(map, symbols, { preferFirst = false } = {}) {
-  const out = [];
-  for (const s of symbols) {
-    const q = map.get(s);
-    if (q && q.regularMarketPrice != null) {
-      out.push({
-        ticker: s,
-        name: FRIENDLY[s] || q.shortName || q.longName || s,
-        c: +q.regularMarketPrice,
-        d: +q.regularMarketChange || 0,
-        dp: +q.regularMarketChangePercent || 0,
-        t: q.regularMarketTime || 0,
-      });
-    }
-  }
-  // For indices, we only want the best representatives:
-  // - Prefer ^DJI over DIA, ^GSPC over SPY, ^IXIC over QQQ (if present)
-  if (preferFirst) {
-    const norm = [];
-    // Desired order
-    const groups = [
-      ["^DJI", "DIA"],
-      ["^GSPC", "SPY"],
-      ["^IXIC", "QQQ"],
-    ];
-    for (const g of groups) {
-      const found = out.find((x) => x.ticker === g[0]) || out.find((x) => x.ticker === g[1]);
-      if (found) norm.push(found);
-    }
-    return norm;
-  }
-  return out;
+function mapBySymbol(quotes) {
+  const m = new Map();
+  for (const q of quotes) m.set(q.ticker, q);
+  return m;
 }
 
-// ---- Simple /tmp cache helpers ----
 function readCache() {
   try {
     const fs = require("fs");
-    if (!fs.existsSync(CACHE_PATH)) return null;
-    const raw = fs.readFileSync(CACHE_PATH, "utf8");
-    const json = JSON.parse(raw);
-    if (Date.now() - (json.ts || 0) > TTL_MS) return null;
-    return json.data || null;
-  } catch (_) {
-    return null;
-  }
+    if (fs.existsSync(CACHE_FILE)) {
+      const raw = fs.readFileSync(CACHE_FILE, "utf8");
+      return JSON.parse(raw);
+    }
+  } catch (_) {}
+  return null;
 }
 
-function writeCache(data) {
+function writeCache(payload) {
   try {
     const fs = require("fs");
-    fs.writeFileSync(CACHE_PATH, JSON.stringify({ ts: Date.now(), data }));
+    fs.writeFileSync(CACHE_FILE, JSON.stringify(payload));
   } catch (_) {}
 }
 
+// ----- Handler ---------------------------------------------------------------
+
 exports.handler = async function () {
   try {
-    // Try cache first
+    // Fetch everything in one Yahoo call
+    const allSymbols = [...new Set([...MACRO, ...INDICES, ...AI, ...CRYPTO, ...ENERGY])];
+    const quotes = await yahooQuotes(allSymbols);
+    const bySym = mapBySymbol(quotes);
+
+    const payload = {
+      macro: MACRO.map(s => bySym.get(s)).filter(Boolean),
+      indices: INDICES.map(s => bySym.get(s)).filter(Boolean),
+      ai: AI.map(s => bySym.get(s)).filter(Boolean),
+      crypto: CRYPTO.map(s => bySym.get(s)).filter(Boolean),
+      energy: ENERGY.map(s => bySym.get(s)).filter(Boolean),
+      ts: Date.now(),
+      source: "live",
+    };
+
+    // persist in /tmp so we can serve stale on outages
+    writeCache(payload);
+
+    return {
+      statusCode: 200,
+      headers: HEADERS,
+      body: JSON.stringify({ status: "ok", data: payload }),
+    };
+  } catch (e) {
+    // On failure, try to serve the last good payload
     const cached = readCache();
     if (cached) {
+      cached.source = "cache";
       return {
         statusCode: 200,
         headers: HEADERS,
-        body: JSON.stringify({ status: "ok", data: cached, source: "cache" }),
+        body: JSON.stringify({ status: "ok", data: cached }),
       };
     }
-
-    // Fetch everything at once
-    const all = Array.from(
-      new Set([
-        ...SYMBOLS.macro,
-        ...SYMBOLS.indices,
-        ...SYMBOLS.ai,
-        ...SYMBOLS.crypto,
-        ...SYMBOLS.energy,
-      ])
-    );
-    const map = await fetchYahooQuoteMap(all);
-
-    const data = {
-      macro: pickQuotes(map, SYMBOLS.macro),
-      indices: pickQuotes(map, SYMBOLS.i
+    return {
+      statusCode: 500,
+      headers: HEADERS,
+      body: JSON.stringify({ status: "error", message: e.message }),
+    };
+  }
+};
