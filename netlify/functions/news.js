@@ -96,7 +96,71 @@ async function fetchFromGNews(section) {
     return data.articles.map(transformGNewsArticle);
 }
 
-// --- Second Fallback: Finnhub Configuration (for Finance only) ---
+// --- Second Fallback: Webz.io Configuration ---
+const WEBZIO_BASE = "https://api.webz.io/newsApiLite";
+const WEBZIO_QUERY_MAP = {
+    world: '(world OR global)',
+    tech: '(technology OR tech)',
+    finance: '(finance OR business OR markets)',
+    frontpage: '(breaking OR "top stories")'
+};
+
+function transformWebzArticle(post) {
+    return {
+        title: post.title,
+        description: post.text.slice(0, 200) + '...',
+        url: post.url,
+        publishedAt: post.published
+    };
+}
+
+async function fetchFromWebz(section) {
+    const query = WEBZIO_QUERY_MAP[section] || 'news';
+    const url = new URL(WEBZIO_BASE);
+    url.searchParams.set('token', process.env.WEBZIO_API_KEY);
+    url.searchParams.set('q', query);
+    
+    const response = await fetch(url.toString());
+    if (!response.ok) {
+        throw new Error(`Webz.io failed with status: ${response.status}`);
+    }
+    const data = await response.json();
+    if (!data.posts || data.posts.length === 0) {
+        throw new Error('Webz.io returned no articles.');
+    }
+    return data.posts.map(transformWebzArticle);
+}
+
+// --- Third Fallback: Polygon.io Configuration ---
+const POLYGON_BASE = "https://api.polygon.io/v2/reference/news";
+
+function transformPolygonArticle(article) {
+    return {
+        title: article.title,
+        description: article.description,
+        url: article.article_url,
+        publishedAt: article.published_utc
+    };
+}
+
+async function fetchFromPolygon() {
+    const url = new URL(POLYGON_BASE);
+    url.searchParams.set('limit', 20);
+    url.searchParams.set('apiKey', process.env.POLYGON_API_KEY);
+
+    const response = await fetch(url.toString());
+    if (!response.ok) {
+        throw new Error(`Polygon.io failed with status: ${response.status}`);
+    }
+    const data = await response.json();
+    if (!data.results || data.results.length === 0) {
+        throw new Error('Polygon.io returned no articles.');
+    }
+    return data.results.map(transformPolygonArticle);
+}
+
+
+// --- Fourth Fallback: Finnhub Configuration (for Finance only) ---
 const FINNHUB_BASE = "https://finnhub.io/api/v1/news";
 
 function transformFinnhubArticle(article) {
@@ -141,48 +205,32 @@ export async function handler(event) {
     try {
       articles = await fetchFromGNews(section);
       source = 'GNews';
-    } catch (fallbackError) {
-      console.warn(`GNews fallback also failed for '${section}': ${fallbackError.message}.`);
-      if (section === 'finance') {
-        console.log("Trying Finnhub as final fallback for 'finance'...");
+    } catch (gnewsError) {
+      console.warn(`GNews fallback also failed for '${section}': ${gnewsError.message}. Trying Webz.io...`);
+      try {
+        articles = await fetchFromWebz(section);
+        source = 'Webz.io';
+      } catch (webzError) {
+        console.warn(`Webz.io fallback also failed for '${section}': ${webzError.message}. Trying Polygon.io...`);
         try {
-          articles = await fetchFromFinnhub();
-          source = 'Finnhub';
-        } catch (finnhubError) {
-          console.error(`All sources failed for '${section}'. Attempting to load from cache.`);
-          // If all APIs fail, try to load from the cache
-          const cachedArticles = await cache.get(`${section}-articles`, { type: 'json' });
-          if (cachedArticles) {
-            console.log(`Successfully loaded ${cachedArticles.length} articles from cache for '${section}'.`);
-            return {
-              statusCode: 200,
-              headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-              body: JSON.stringify({ status: "ok", articles: cachedArticles, source: 'cache' })
-            };
-          }
-          // If cache is also empty, return the final error
-          return {
-            statusCode: 500,
-            headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-            body: JSON.stringify({ status: "error", message: finnhubError.message })
-          };
+            articles = await fetchFromPolygon();
+            source = 'Polygon.io';
+        } catch (polygonError) {
+            console.warn(`Polygon.io fallback also failed for '${section}': ${polygonError.message}.`);
+            if (section === 'finance') {
+              console.log("Trying Finnhub as final fallback for 'finance'...");
+              try {
+                articles = await fetchFromFinnhub();
+                source = 'Finnhub';
+              } catch (finnhubError) {
+                console.error(`All API sources failed for '${section}'. Attempting to load from cache.`);
+                return await loadFromCache(cache, section, finnhubError);
+              }
+            } else {
+                console.error(`All API sources failed for '${section}'. Attempting to load from cache.`);
+                return await loadFromCache(cache, section, polygonError);
+            }
         }
-      } else {
-         // For non-finance sections, try to load from cache after GNews fails
-         const cachedArticles = await cache.get(`${section}-articles`, { type: 'json' });
-         if (cachedArticles) {
-            console.log(`Successfully loaded ${cachedArticles.length} articles from cache for '${section}'.`);
-            return {
-              statusCode: 200,
-              headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-              body: JSON.stringify({ status: "ok", articles: cachedArticles, source: 'cache' })
-            };
-         }
-         return {
-            statusCode: 500,
-            headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-            body: JSON.stringify({ status: "error", message: fallbackError.message })
-         };
       }
     }
   }
@@ -199,5 +247,24 @@ export async function handler(event) {
     body: JSON.stringify({ status: "ok", articles, source })
   };
 }
+
+async function loadFromCache(cache, section, finalError) {
+    const cachedArticles = await cache.get(`${section}-articles`, { type: 'json' });
+    if (cachedArticles) {
+        console.log(`Successfully loaded ${cachedArticles.length} articles from cache for '${section}'.`);
+        return {
+            statusCode: 200,
+            headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+            body: JSON.stringify({ status: "ok", articles: cachedArticles, source: 'cache' })
+        };
+    }
+    // If cache is also empty, return the final error
+    return {
+        statusCode: 500,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+        body: JSON.stringify({ status: "error", message: finalError.message })
+    };
+}
+
 
 
