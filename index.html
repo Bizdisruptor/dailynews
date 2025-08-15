@@ -1,52 +1,61 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8"/>
+  <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>The Cerf Report — Curated News</title>
   <style>
-    :root{
+    :root {
       --blue:#0056b3; --ink:#1c1e21; --muted:#606770; --paper:#fff; --bg:#f0f2f5;
-      --positive:#1a7f37; --negative:#c62828;
+      --positive:#17823b; --negative:#b00020;
     }
-    *{box-sizing:border-box}
-    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink);margin:0;padding:20px}
-    h1{text-align:center;color:var(--blue);margin:0 0 8px}
+    * { box-sizing:border-box; }
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink);margin:0;padding:18px}
+    h1{text-align:center;color:var(--blue);margin:0 0 6px}
     .subhead{text-align:center;color:var(--muted);margin:0 0 18px;font-size:.95rem}
 
-    /* Market header — tighter layout */
-    .market-ticker{background:var(--paper);border-radius:12px;padding:12px 14px;margin-bottom:16px;box-shadow:0 1px 4px rgba(0,0,0,.06)}
-    .row{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center}
-    .row + .row{margin-top:10px;padding-top:10px;border-top:1px solid #eee}
-    .q{display:flex;gap:8px;align-items:baseline}
-    .q a{color:inherit;text-decoration:none;font-weight:600}
-    .q a:hover{text-decoration:underline;color:var(--blue)}
-    .q .price{font-variant-numeric:tabular-nums;font-weight:600}
-    .q .chg{font-variant-numeric:tabular-nums}
-    .positive{color:var(--positive)} .negative{color:var(--negative)}
+    /* Market header */
+    .market {
+      background:var(--paper); border-radius:12px; box-shadow:0 2px 6px rgba(0,0,0,.08);
+      padding:12px 14px; margin:0 auto 18px; max-width:1400px;
+    }
+    .market .row { display:flex; flex-wrap:wrap; gap:16px 24px; align-items:center; }
+    .chip {
+      display:flex; gap:6px; align-items:center; font-size:.92rem;
+    }
+    .chip a { color:inherit; text-decoration:none; font-weight:600; }
+    .chip a:hover { text-decoration:underline; color:var(--blue); }
+    .price { font-weight:600; }
+    .chg.positive{ color:var(--positive); }
+    .chg.negative{ color:var(--negative); }
+    .divider { height:10px }
 
-    /* Movers grid */
-    .movers{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px 16px;margin-top:6px}
-    .mcat h3{margin:0 0 4px;font-size:.82rem;color:var(--blue);text-transform:uppercase;letter-spacing:.4px}
-    .mlist{display:grid;grid-template-columns:1fr auto;gap:2px 8px;font-size:.9rem}
-    .mlist .sym a{font-weight:600;color:inherit;text-decoration:none}
-    .mlist .sym a:hover{color:var(--blue);text-decoration:underline}
+    .mover-grid {
+      display:grid; gap:10px 14px; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));
+      margin-top:8px;
+    }
+    .mgroup h3 {
+      margin:0 0 6px; font-size:.8rem; color:var(--blue); letter-spacing:.5px; text-transform:uppercase;
+    }
+    .mlist div { display:flex; justify-content:space-between; font-size:.88rem; padding:1px 0; }
+    .mlist a { font-weight:600; color:inherit; text-decoration:none; }
+    .mlist a:hover { text-decoration:underline; color:var(--blue); }
 
     /* Cards */
-    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px}
-    .card{background:var(--paper);border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.06);padding:16px;overflow:hidden}
-    .card h2{margin:0 0 6px;border-bottom:2px solid var(--blue);padding-bottom:8px;font-size:1.1rem}
-    .section-link{margin:-2px 0 10px}
-    .section-link a{font-size:.92rem;text-decoration:none}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:18px; max-width:1400px; margin:0 auto}
+    .card{background:var(--paper);border-radius:12px;box-shadow:0 2px 6px rgba(0,0,0,.08);padding:16px;overflow:hidden}
+    .card h2{margin:0 0 8px;border-bottom:2px solid var(--blue);padding-bottom:8px;font-size:1.1rem}
+    .section-link{margin:-4px 0 8px}
+    .section-link a{font-size:.9rem;text-decoration:none}
     .section-link a:hover{text-decoration:underline}
-    .list{max-height:520px;overflow-y:auto;padding-right:10px;min-height:100px}
+    .list{max-height:520px;overflow-y:auto;padding-right:8px;min-height:100px}
     .item{margin:0 0 12px;border-bottom:1px solid #eee;padding:0 0 10px}
     .item:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0}
     .item a{color:#0d6efd;text-decoration:none;font-weight:600}
     .item a:hover{text-decoration:underline}
     .item p{margin:6px 0 0;color:var(--muted);font-size:.92rem;line-height:1.35}
-    .loading{text-align:center;padding:12px;color:var(--muted);line-height:1.4}
-    .footer{margin-top:14px;text-align:center;color:#8a8f98;font-size:.85rem}
+    .loading{text-align:center;padding:14px;color:var(--muted);line-height:1.4;}
+    .footer{margin:16px auto 0;text-align:center;color:#8a8f98;font-size:.85rem;max-width:1400px}
   </style>
 </head>
 <body>
@@ -54,11 +63,10 @@
   <div class="subhead">News minus the junk. Tech, finance, and interesting stuff.</div>
 
   <!-- Market header -->
-  <div class="market-ticker" id="market-ticker">
+  <div class="market" id="market">
     <div class="loading">Loading market data…</div>
   </div>
 
-  <!-- News grid -->
   <div class="grid">
     <div class="card" id="front-card">
       <h2>Front Page</h2>
@@ -90,202 +98,10 @@
   <div class="footer" id="updatedAt"></div>
 
   <script>
-    /* ---------------- localStorage cache helpers ---------------- */
-    const cache = {
-      get(k){ try { return JSON.parse(localStorage.getItem(k) || "null"); } catch { return null; } },
-      set(k,v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
-    };
+    /* ---------- Utilities ---------- */
+    const $ = (sel, root = document) => root.querySelector(sel);
+    const financeUrl = (t) => `https://finance.yahoo.com/quote/${encodeURIComponent(t)}`;
 
-    /* ---------------- sections ---------------- */
-    const sections = [
-      { id:"front-card",   section:"frontpage", cacheKey:"news.front" },
-      { id:"tech-card",    section:"tech",      cacheKey:"news.tech" },
-      { id:"world-card",   section:"world",     cacheKey:"news.world" },
-      { id:"finance-card", section:"finance",   cacheKey:"news.finance" },
-    ];
-    const $ = (sel, root=document) => root.querySelector(sel);
-
-    /* ---------------- render helpers ---------------- */
-    function setError(el, msg='Could not load data at this time.') {
-      el.innerHTML = `<div class="loading">${msg}</div>`;
-    }
-
-    function render(listEl, articles, keepExistingIfEmpty=true){
-      if (!Array.isArray(articles) || articles.length===0){
-        if (!keepExistingIfEmpty) setError(listEl, 'Could not load news at this time.');
-        return;
-      }
-      const frag = document.createDocumentFragment();
-      for (const a of articles){
-        if (!a || !a.title) continue;
-        const div = document.createElement("div");
-        div.className = "item";
-        div.innerHTML = `
-          <a href="${a.url}" target="_blank" rel="noopener noreferrer">${a.title}</a>
-          <p>${a.description ? a.description : ""}</p>
-        `;
-        frag.appendChild(div);
-      }
-      listEl.innerHTML = "";
-      listEl.appendChild(frag);
-    }
-
-    // --- Market rendering ---
-    function fmtNum(n, d=2){ return (n==null || isNaN(n)) ? "N/A" : Number(n).toFixed(d); }
-    function fmtChg(d,dp){
-      const sign = (d??0) >= 0 ? '+' : '';
-      const cls = (d??0) >= 0 ? 'positive' : 'negative';
-      return `<span class="chg ${cls}">${sign}${fmtNum(d,2)} (${sign}${fmtNum(dp,2)}%)</span>`;
-    }
-    function priceFor(ticker, c){
-      if (ticker === "^TNX") { // Yahoo ^TNX is yield*10
-        if (c==null) return "N/A";
-        return (Number(c)/10).toFixed(2) + "%";
-      }
-      const dec = /-USD$/.test(ticker) ? 0 : (/=F$/.test(ticker) ? 2 : 2);
-      return fmtNum(c, dec);
-    }
-    function link(sym){ return `https://finance.yahoo.com/quote/${encodeURIComponent(sym)}`; }
-
-    function renderMarketData(data){
-      const el = $('#market-ticker');
-      if (!data) { setError(el, 'Could not load market data.'); return; }
-
-      const macro = (data.macro||[]).map(x=>`
-        <div class="q">
-          <a href="${link(x.ticker)}" target="_blank" rel="noopener noreferrer">${x.name||x.ticker}</a>
-          <span class="price">${priceFor(x.ticker, x.c)}</span>
-          ${fmtChg(x.d,x.dp)}
-        </div>
-      `).join('');
-
-      const indices = (data.indices||[]).map(x=>`
-        <div class="q">
-          <a href="${link(x.ticker)}" target="_blank" rel="noopener noreferrer">${x.name||x.ticker}</a>
-          <span class="price">${priceFor(x.ticker, x.c)}</span>
-          ${fmtChg(x.d,x.dp)}
-        </div>
-      `).join('');
-
-      const movers = Object.entries(data.movers||{}).map(([cat,items])=>`
-        <div class="mcat">
-          <h3>${cat.toUpperCase()}</h3>
-          <div class="mlist">
-            ${(items||[]).map(s=>`
-              <div class="sym">
-                <a href="${link(s.ticker)}" target="_blank" rel="noopener noreferrer">${s.ticker}</a>
-              </div>
-              <div class="chgwrap">${fmtChg(s.d,s.dp)}</div>
-            `).join('')}
-          </div>
-        </div>
-      `).join('');
-
-      el.innerHTML = `
-        <div class="row">${macro}</div>
-        <div class="row">${indices}</div>
-        <div class="movers">${movers}</div>
-      `;
-    }
-
-    /* ---------------- data fetchers ---------------- */
-    async function fetchMarket(){
-      const r = await fetch('/.netlify/functions/market-data');
-      if (!r.ok) throw new Error(`market ${r.status}`);
-      const json = await r.json();
-      if (json.status!=="ok") throw new Error(json.message||"market error");
-      return json.data;
-    }
-
-    async function fetchNews(section){
-      const r = await fetch(`/.netlify/functions/news?section=${encodeURIComponent(section)}`);
-      if (!r.ok) throw new Error(`news ${section} ${r.status}`);
-      const data = await r.json();
-      const articles = Array.isArray(data?.articles) ? data.articles
-                    : Array.isArray(data?.data?.articles) ? data.data.articles
-                    : [];
-      return articles;
-    }
-
-    async function fetchCerf(){
-      const r = await fetch('/.netlify/functions/substack?mode=archive');
-      const data = await r.json().catch(()=> ({}));
-      if (!r.ok || data.status!=='ok' || !Array.isArray(data.articles)) {
-        throw new Error((data && data.message) ? data.message : ('HTTP '+r.status));
-      }
-      return data.articles.map(a=>({
-        title: a.title || "Untitled",
-        url: a.url,
-        description: a.description || ""
-      }));
-    }
-
-    /* ---------------- update flow ---------------- */
-    async function updateAll(){
-      const footer = $("#updatedAt");
-      footer.textContent = "Updating…";
-
-      // Cache-first render to avoid blanks
-      const cachedMarket = cache.get("market.data");
-      if (cachedMarket) renderMarketData(cachedMarket);
-
-      const haveCache = {};
-      for (const s of sections){
-        const cached = cache.get(s.cacheKey);
-        haveCache[s.cacheKey] = !!cached;
-        if (cached) render($(`#${s.id} .list`), cached, true);
-      }
-      const cachedCerf = cache.get("cerf.articles");
-      const haveCerfCache = !!cachedCerf;
-      if (cachedCerf) render($("#cerf-card .list"), cachedCerf, true);
-
-      // Fetch fresh in parallel
-      const fresh = await Promise.allSettled([
-        fetchMarket(),
-        ...sections.map(s=>fetchNews(s.section)),
-        fetchCerf()
-      ]);
-
-      // Market
-      if (fresh[0].status==="fulfilled"){
-        renderMarketData(fresh[0].value);
-        cache.set("market.data", fresh[0].value);
-      } else if (!cachedMarket) {
-        setError($('#market-ticker'), 'Could not load market data.');
-        console.error('Market fetch failed:', fresh[0].reason);
-      }
-
-      // Sections
-      sections.forEach((s, i)=>{
-        const res = fresh[i+1];
-        const el = $(`#${s.id} .list`);
-        if (res.status==="fulfilled" && Array.isArray(res.value) && res.value.length){
-          render(el, res.value, false);
-          cache.set(s.cacheKey, res.value);
-        } else if (!haveCache[s.cacheKey]) {
-          setError(el, 'Could not load news at this time.');
-          if (res.status==="rejected") console.error(`News ${s.section} failed:`, res.reason);
-        }
-      });
-
-      // Cerf
-      const cerfRes = fresh[1+sections.length];
-      const cerfEl = $("#cerf-card .list");
-      if (cerfRes.status==="fulfilled" && Array.isArray(cerfRes.value) && cerfRes.value.length){
-        render(cerfEl, cerfRes.value, false);
-        cache.set("cerf.articles", cerfRes.value);
-      } else if (!haveCerfCache) {
-        setError(cerfEl, 'Could not load Substack at this time.');
-        if (cerfRes.status==="rejected") console.error('Substack failed:', cerfRes.reason);
-      }
-
-      footer.textContent = "Updated " + new Date().toLocaleString();
-    }
-
-    document.addEventListener("DOMContentLoaded", ()=>{
-      updateAll();
-      setInterval(updateAll, 5*60*1000);
-    });
-  </script>
-</body>
-</html>
+    function fmt(n, d=2) { if (n == null || isNaN(n)) return "—"; return (+n).toFixed(d); }
+    function chipHTML(q) {
+      const sign = (
