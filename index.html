@@ -7,7 +7,7 @@
   <style>
     :root { --blue:#0056b3; --ink:#1c1e21; --muted:#606770; --paper:#fff; --bg:#f0f2f5; }
     * { box-sizing:border-box }
-    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink);margin:0;padding:20px}
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var-bg);color:var(--ink);margin:0;padding:20px}
     h1{text-align:center;color:var(--blue);margin:0 0 8px}
     .subhead{text-align:center;color:var(--muted);margin:0 0 22px;font-size:.95rem}
     .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:20px}
@@ -35,22 +35,18 @@
       <h2>Front Page</h2>
       <div class="list"></div>
     </div>
-
     <div class="card" id="tech-card">
       <h2>Technology</h2>
       <div class="list"></div>
     </div>
-
     <div class="card" id="world-card">
       <h2>World News</h2>
       <div class="list"></div>
     </div>
-
     <div class="card" id="finance-card">
       <h2>Finance</h2>
       <div class="list"></div>
     </div>
-
     <div class="card" id="cerf-card">
       <h2>The Cerf Report</h2>
       <div class="section-link">
@@ -74,15 +70,15 @@
 
     const $ = (sel, root = document) => root.querySelector(sel);
 
+    // ✅ FIX 1: The render() function is updated to no longer erase specific error messages.
     function render(listEl, articles) {
-      listEl.innerHTML = "";
       if (!articles || !articles.length) {
-        // Only set a generic error if a specific one wasn't already placed by the fetch function.
-        if (!listEl.innerHTML.includes('error')) {
-           listEl.innerHTML = '<div class="loading">Could not load news at this time.</div>';
+        if (!/error/i.test(listEl.innerHTML)) {
+          listEl.innerHTML = '<div class="loading">Could not load news at this time.</div>';
         }
         return;
       }
+      listEl.innerHTML = ""; // Now we clear the content *after* the error check.
       for (const a of articles) {
         if (!a || a.title === "[Removed]") continue;
         const div = document.createElement("div");
@@ -109,7 +105,8 @@
 
     async function fetchCerf() {
       const box = $('#cerf-card .list');
-      const url = '/.netlify/functions/substack?feed=https://thecerfreport.substack.com/feed';
+      // ✅ FIX 2: The URL now includes "mode=archive" for a more reliable fetch.
+      const url = '/.netlify/functions/substack?mode=archive&feed=https://thecerfreport.substack.com/feed';
       try {
         const r = await fetch(url);
         const data = await r.json().catch(() => ({}));
@@ -167,6 +164,4 @@
   </script>
 </body>
 </html>
-
-
 
