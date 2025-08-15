@@ -33,20 +33,31 @@
     .index-quote .change { font-size: 0.9rem; }
     .market-movers {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-        gap: 20px;
+        /* ✅ FIX: Adjusted grid for better spacing */
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 10px 20px;
     }
     .mover-category h3 {
-        margin: 0 0 8px;
-        font-size: 0.9rem;
+        margin: 0 0 5px;
+        font-size: 0.85rem;
         color: var(--blue);
         text-transform: uppercase;
+        letter-spacing: 0.5px;
     }
     .mover-list { font-size: 0.85rem; }
-    .mover-list div { display: flex; justify-content: space-between; padding: 2px 0; }
+    /* ✅ FIX: Reduced padding for tighter spacing */
+    .mover-list div { display: flex; justify-content: space-between; padding: 1px 0; }
     .mover-list .ticker { font-weight: 600; }
     .positive { color: var(--positive); }
     .negative { color: var(--negative); }
+    .market-ticker a {
+        color: inherit;
+        text-decoration: none;
+    }
+    .market-ticker a:hover {
+        text-decoration: underline;
+        color: var(--blue);
+    }
 
     .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:20px}
     .card{background:var(--paper);border-radius:12px;box-shadow:0 2px 6px rgba(0,0,0,.08);padding:18px;overflow:hidden}
@@ -113,10 +124,8 @@
     const $ = (sel, root = document) => root.querySelector(sel);
 
     function render(listEl, articles) {
-      // ✅ FIX: Only update the list if the fetch was successful and returned articles.
-      // If 'articles' is null or empty, this function will now do nothing, preserving old content.
       if (articles && articles.length > 0) {
-        listEl.innerHTML = ""; // Clear old content
+        listEl.innerHTML = ""; 
         for (const a of articles) {
           if (!a || !a.title) continue;
           const div = document.createElement("div");
@@ -128,8 +137,6 @@
           listEl.appendChild(div);
         }
       } else {
-        // If the list is currently showing "Loading...", but the fetch failed,
-        // show the "Could not load" message. Otherwise, leave old content.
         if (listEl.innerHTML.includes('loading')) {
             listEl.innerHTML = '<div class="loading">Could not load news at this time.</div>';
         }
@@ -137,7 +144,7 @@
     }
 
     async function fetchMarketData() {
-        const url = '/.netlify/functions/market-data';
+        const url = `${window.location.origin}/.netlify/functions/market-data`;
         try {
             const r = await fetch(url);
             if (!r.ok) throw new Error(`Market data fetch failed: ${r.status}`);
@@ -167,7 +174,9 @@
         
         const indicesHtml = data.indices.map(idx => `
             <div class="index-quote">
-                <div class="name">${idx.name}</div>
+                <div class="name">
+                    <a href="https://finance.yahoo.com/quote/${idx.ticker}" target="_blank" rel="noopener noreferrer">${idx.name}</a>
+                </div>
                 <div class="price">${idx.c ? idx.c.toFixed(2) : 'N/A'}</div>
                 <div class="change">${formatChange(idx.d, idx.dp)}</div>
             </div>
@@ -175,11 +184,13 @@
 
         const moversHtml = Object.entries(data.movers).map(([category, stocks]) => `
             <div class="mover-category">
-                <h3>${category}</h3>
+                <h3>${category.toUpperCase()}</h3>
                 <div class="mover-list">
                     ${stocks.map(stock => `
                         <div>
-                            <span class="ticker">${stock.ticker}</span>
+                            <span class="ticker">
+                                <a href="https://finance.yahoo.com/quote/${stock.ticker}" target="_blank" rel="noopener noreferrer">${stock.ticker}</a>
+                            </span>
                             <span class="change">${formatChange(stock.d, stock.dp)}</span>
                         </div>
                     `).join('')}
@@ -194,21 +205,20 @@
     }
 
     async function fetchNews(section) {
-      const url = `/.netlify/functions/news?section=${encodeURIComponent(section)}`;
+      const url = `${window.location.origin}/.netlify/functions/news?section=${encodeURIComponent(section)}`;
       try {
         const r = await fetch(url);
         if (!r.ok) throw new Error(`News ${section} HTTP ${r.status}`);
         const data = await r.json();
-        // Return null if status is not 'ok' or no articles, so render() knows to keep old content.
         if (data.status !== 'ok' || !data.articles || data.articles.length === 0) return null;
         return data.articles;
       } catch {
-        return null; // Return null on any error
+        return null; 
       }
     }
 
     async function fetchCerf() {
-      const url = '/.netlify/functions/substack?mode=archive';
+      const url = `${window.location.origin}/.netlify/functions/substack?mode=archive`;
       try {
         const r = await fetch(url);
         if (!r.ok) throw new Error('Substack fetch failed');
@@ -228,10 +238,7 @@
     }
 
     async function updateAll() {
-      // ✅ FIX: Don't clear content here. Just fetch and let render() decide.
-      // A small visual indicator that an update is happening.
       const footer = $("#updatedAt");
-      const originalFooterText = footer.textContent;
       footer.textContent = "Updating...";
 
       const results = await Promise.all([
@@ -242,7 +249,6 @@
       sections.forEach((s, i) => render($(`#${s.id} .list`), results[i]));
       render($("#cerf-card .list"), results[sections.length]);
 
-      // Restore footer text or set new time.
       footer.textContent = "Updated " + new Date().toLocaleString();
     }
 
@@ -256,6 +262,7 @@
   </script>
 </body>
 </html>
+
 
 
 
