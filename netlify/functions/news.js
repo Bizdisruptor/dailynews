@@ -1,29 +1,26 @@
-// Curated NewsAPI proxy with whitelists & excludes
+// netlify/functions/news.js
+// Curated NewsAPI proxy with sections + whitelists
 const NEWS_BASE = "https://newsapi.org/v2";
 
+// TUNE ME: trusted sources/domains per section
 const GOOD = {
   world: {
-    // Drudge-style: fast, broad, but only trusted
     endpoint: "top-headlines",
     params: {
       language: "en",
       pageSize: 15,
-      // Stick to AP/Reu/BBC for clean wires; extend if you like
-      sources: "associated-press,reuters,bbc-news",
-    },
+      sources: "associated-press,reuters,bbc-news"
+    }
   },
   tech: {
-    // TechCrunch + a few reputable tech outlets
     endpoint: "top-headlines",
     params: {
       language: "en",
       pageSize: 12,
-      sources: "techcrunch,the-verge,engadget,axios,ars-technica",
-    },
+      sources: "techcrunch,the-verge,engadget,axios,ars-technica"
+    }
   },
   finance: {
-    // Finance via domains (some big names are limited by NewsAPI licensing,
-    // but CNBC, Barron's, MarketWatch, Reuters usually work well)
     endpoint: "everything",
     params: {
       language: "en",
@@ -31,24 +28,19 @@ const GOOD = {
       pageSize: 12,
       q: "(stocks OR markets OR bonds OR inflation OR fed OR earnings)",
       domains: [
-        "cnbc.com",
-        "barrons.com",
-        "marketwatch.com",
         "reuters.com",
-        "wsj.com",        // may be partial
+        "cnbc.com",
+        "marketwatch.com",
+        "barrons.com",
+        "wsj.com",
         "fortune.com",
         "financialpost.com"
       ].join(","),
-      excludeDomains: [
-        "biztoc.com",
-        "the-sun.com",
-        "dailyexpress.co.uk",
-        "cointelegraph.com" // remove if you want more crypto
-      ].join(",")
-    },
+      excludeDomains: ["biztoc.com","the-sun.com","dailyexpress.co.uk"].join(",")
+    }
   },
-  // General “drudge-like” mix (you can aim your homepage here if you want)
   frontpage: {
+    // Drudge-ish mix from trusted outlets
     endpoint: "everything",
     params: {
       language: "en",
@@ -56,8 +48,9 @@ const GOOD = {
       pageSize: 18,
       q: "(election OR border OR crime OR war OR trade OR tariffs OR immigration OR protest OR courts)",
       domains: [
-        "reuters.com","apnews.com","bbc.com","cnbc.com","nypost.com",
-        "wsj.com","abcnews.go.com","nbcnews.com","foxnews.com","newsweek.com"
+        "reuters.com","apnews.com","bbc.com","cnbc.com",
+        "nypost.com","wsj.com","abcnews.go.com","nbcnews.com",
+        "foxnews.com","newsweek.com"
       ].join(","),
       excludeDomains: ["biztoc.com","the-sun.com","mirror.co.uk"].join(",")
     }
@@ -70,11 +63,10 @@ export async function handler(event) {
     const cfg = GOOD[section] || GOOD.world;
 
     const u = new URL(`${NEWS_BASE}/${cfg.endpoint}`);
-    // Build query quickly
     for (const [k, v] of Object.entries(cfg.params)) {
       if (v) u.searchParams.set(k, v);
     }
-    // If using top-headlines and not specifying sources, add country for volume
+    // If using top-headlines without explicit sources, add country for volume
     if (cfg.endpoint === "top-headlines" && !u.searchParams.get("sources")) {
       u.searchParams.set("country", "us");
     }
@@ -86,10 +78,7 @@ export async function handler(event) {
     const text = await r.text();
     return {
       statusCode: r.status,
-      headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*"
-      },
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
       body: text
     };
   } catch (err) {
@@ -100,3 +89,4 @@ export async function handler(event) {
     };
   }
 }
+
