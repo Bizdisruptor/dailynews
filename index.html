@@ -7,7 +7,8 @@
   <style>
     :root { --blue:#0056b3; --ink:#1c1e21; --muted:#606770; --paper:#fff; --bg:#f0f2f5; }
     * { box-sizing:border-box }
-    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var-bg);color:var(--ink);margin:0;padding:20px}
+    /* ✅ FIX 1: Corrected the CSS typo. */
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink);margin:0;padding:20px}
     h1{text-align:center;color:var(--blue);margin:0 0 8px}
     .subhead{text-align:center;color:var(--muted);margin:0 0 22px;font-size:.95rem}
     .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:20px}
@@ -70,7 +71,6 @@
 
     const $ = (sel, root = document) => root.querySelector(sel);
 
-    // ✅ FIX 1: The render() function is updated to no longer erase specific error messages.
     function render(listEl, articles) {
       if (!articles || !articles.length) {
         if (!/error/i.test(listEl.innerHTML)) {
@@ -78,7 +78,7 @@
         }
         return;
       }
-      listEl.innerHTML = ""; // Now we clear the content *after* the error check.
+      listEl.innerHTML = "";
       for (const a of articles) {
         if (!a || a.title === "[Removed]") continue;
         const div = document.createElement("div");
@@ -103,10 +103,10 @@
       }
     }
 
+    // ✅ FIX 2: Replaced with the simpler and safer fetchCerf function (Option A).
     async function fetchCerf() {
-      const box = $('#cerf-card .list');
-      // ✅ FIX 2: The URL now includes "mode=archive" for a more reliable fetch.
-      const url = '/.netlify/functions/substack?mode=archive&feed=https://thecerfreport.substack.com/feed';
+      const box = document.querySelector('#cerf-card .list');
+      const url = '/.netlify/functions/substack?mode=archive'; // No feed param
       try {
         const r = await fetch(url);
         const data = await r.json().catch(() => ({}));
@@ -134,7 +134,7 @@
         if (box) {
           box.innerHTML = `
             <div class="loading">
-              <span style="color: #c00; font-weight: bold;">Substack error:</span> ${String(e.message || e).slice(0, 140)}
+              <span style="color:#c00;font-weight:bold;">Substack error:</span> ${String(e.message || e).slice(0,140)}
               <br>— <a href="https://thecerfreport.substack.com/" target="_blank" rel="noopener noreferrer">open feed directly</a>
             </div>`;
         }
@@ -164,4 +164,5 @@
   </script>
 </body>
 </html>
+
 
