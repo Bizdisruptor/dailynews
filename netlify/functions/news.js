@@ -1,5 +1,6 @@
 // netlify/functions/news.js
-// Fetches news from NewsAPI, with a fallback to GNews if it fails.
+// Fetches news from APIs and caches the last successful result using Netlify Blobs.
+import { getStore } from "@netlify/blobs";
 
 // --- Primary Source: NewsAPI Configuration ---
 const NEWSAPI_BASE = "https://newsapi.org/v2";
@@ -51,10 +52,9 @@ async function fetchFromNewsAPI(section) {
     throw new Error(`NewsAPI failed with status: ${response.status}`);
   }
   const data = await response.json();
-  if (data.status !== 'ok') {
-      throw new Error(`NewsAPI returned an error: ${data.message}`);
+  if (data.status !== 'ok' || data.totalResults === 0) {
+      throw new Error(`NewsAPI returned an error or no articles: ${data.message || 'No articles found'}`);
   }
-  // The data from NewsAPI is already in the correct format.
   return data.articles;
 }
 
@@ -68,7 +68,6 @@ const GNEWS_CATEGORY_MAP = {
     frontpage: 'general'
 };
 
-// GNews returns data in a different format, so we need to adapt it.
 function transformGNewsArticle(article) {
     return {
         title: article.title,
@@ -91,46 +90,114 @@ async function fetchFromGNews(section) {
         throw new Error(`GNews failed with status: ${response.status}`);
     }
     const data = await response.json();
-    // Transform each article to match the format our front-end expects.
+    if (!data.articles || data.articles.length === 0) {
+        throw new Error('GNews returned no articles.');
+    }
     return data.articles.map(transformGNewsArticle);
 }
 
+// --- Second Fallback: Finnhub Configuration (for Finance only) ---
+const FINNHUB_BASE = "https://finnhub.io/api/v1/news";
 
-// --- Main Handler with Fallback Logic ---
+function transformFinnhubArticle(article) {
+    return {
+        title: article.headline,
+        description: article.summary,
+        url: article.url,
+        publishedAt: new Date(article.datetime * 1000).toISOString()
+    };
+}
+
+async function fetchFromFinnhub() {
+    const url = new URL(FINNHUB_BASE);
+    url.searchParams.set('category', 'general');
+    url.searchParams.set('token', process.env.FINNHUB_API_KEY);
+
+    const response = await fetch(url.toString());
+    if (!response.ok) {
+        throw new Error(`Finnhub failed with status: ${response.status}`);
+    }
+    const data = await response.json();
+    if (!data || data.length === 0) {
+        throw new Error('Finnhub returned no articles.');
+    }
+    return data.slice(0, 15).map(transformFinnhubArticle);
+}
+
+
+// --- Main Handler with Fallback and Caching Logic ---
 export async function handler(event) {
   const section = (event.queryStringParameters?.section || "world").toLowerCase();
+  const cache = getStore('news-cache');
+
+  let articles;
+  let source = 'unknown';
 
   try {
-    // 1. Try fetching from the primary source first.
-    console.log(`Attempting to fetch '${section}' from NewsAPI...`);
-    const articles = await fetchFromNewsAPI(section);
-    console.log(`Successfully fetched ${articles.length} articles from NewsAPI.`);
-    return {
-      statusCode: 200,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-      body: JSON.stringify({ status: "ok", articles })
-    };
+    articles = await fetchFromNewsAPI(section);
+    source = 'NewsAPI';
   } catch (primaryError) {
-    // 2. If it fails, log the error and try the fallback source.
-    console.warn(`Primary source (NewsAPI) failed: ${primaryError.message}. Trying fallback...`);
+    console.warn(`Primary source (NewsAPI) failed for '${section}': ${primaryError.message}. Trying GNews...`);
     try {
-      const articles = await fetchFromGNews(section);
-      console.log(`Successfully fetched ${articles.length} articles from GNews fallback.`);
-      return {
-        statusCode: 200,
-        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-        body: JSON.stringify({ status: "ok", articles })
-      };
+      articles = await fetchFromGNews(section);
+      source = 'GNews';
     } catch (fallbackError) {
-      // 3. If the fallback also fails, return an error.
-      console.error(`Fallback source (GNews) also failed: ${fallbackError.message}`);
-      return {
-        statusCode: 500,
-        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-        body: JSON.stringify({ status: "error", message: fallbackError.message })
-      };
+      console.warn(`GNews fallback also failed for '${section}': ${fallbackError.message}.`);
+      if (section === 'finance') {
+        console.log("Trying Finnhub as final fallback for 'finance'...");
+        try {
+          articles = await fetchFromFinnhub();
+          source = 'Finnhub';
+        } catch (finnhubError) {
+          console.error(`All sources failed for '${section}'. Attempting to load from cache.`);
+          // If all APIs fail, try to load from the cache
+          const cachedArticles = await cache.get(`${section}-articles`, { type: 'json' });
+          if (cachedArticles) {
+            console.log(`Successfully loaded ${cachedArticles.length} articles from cache for '${section}'.`);
+            return {
+              statusCode: 200,
+              headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+              body: JSON.stringify({ status: "ok", articles: cachedArticles, source: 'cache' })
+            };
+          }
+          // If cache is also empty, return the final error
+          return {
+            statusCode: 500,
+            headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+            body: JSON.stringify({ status: "error", message: finnhubError.message })
+          };
+        }
+      } else {
+         // For non-finance sections, try to load from cache after GNews fails
+         const cachedArticles = await cache.get(`${section}-articles`, { type: 'json' });
+         if (cachedArticles) {
+            console.log(`Successfully loaded ${cachedArticles.length} articles from cache for '${section}'.`);
+            return {
+              statusCode: 200,
+              headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+              body: JSON.stringify({ status: "ok", articles: cachedArticles, source: 'cache' })
+            };
+         }
+         return {
+            statusCode: 500,
+            headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+            body: JSON.stringify({ status: "error", message: fallbackError.message })
+         };
+      }
     }
   }
+
+  // If we successfully fetched from any API, save the result to the cache
+  if (articles && articles.length > 0) {
+    await cache.set(`${section}-articles`, articles);
+    console.log(`Successfully fetched ${articles.length} articles from ${source} and updated cache for '${section}'.`);
+  }
+
+  return {
+    statusCode: 200,
+    headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+    body: JSON.stringify({ status: "ok", articles, source })
+  };
 }
 
 
