@@ -68,3 +68,196 @@
       <div class="list"><div class="loading">Loading…</div></div>
     </div>
     <div class="card" id="finance-card">
+      <h2>Finance</h2>
+      <div class="list"><div class="loading">Loading…</div></div>
+    </div>
+    <div class="card" id="cerf-card">
+      <h2>The Cerf Report</h2>
+      <div class="section-link">
+        <a href="https://thecerfreport.substack.com/" target="_blank" rel="noopener noreferrer">
+          thecerfreport.substack.com →
+        </a>
+      </div>
+      <div class="list"><div class="loading">Loading…</div></div>
+    </div>
+  </div>
+
+  <div class="footer" id="updatedAt"></div>
+
+  <script>
+    /* ---------------- localStorage cache helpers ---------------- */
+    const cache = {
+      get(k){ try { return JSON.parse(localStorage.getItem(k) || "null"); } catch { return null; } },
+      set(k,v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
+    };
+
+    /* ---------------- sections ---------------- */
+    const sections = [
+      { id:"front-card",   section:"frontpage", cacheKey:"news.front" },
+      { id:"tech-card",    section:"tech",      cacheKey:"news.tech" },
+      { id:"world-card",   section:"world",     cacheKey:"news.world" },
+      { id:"finance-card", section:"finance",   cacheKey:"news.finance" },
+    ];
+    const $ = (sel, root=document) => root.querySelector(sel);
+
+    /* ---------------- render helpers ---------------- */
+    function setError(el, msg='Could not load data at this time.') {
+      el.innerHTML = `<div class="loading">${msg}</div>`;
+    }
+
+    function render(listEl, articles, keepExistingIfEmpty=true){
+      if (!Array.isArray(articles) || articles.length===0){
+        if (!keepExistingIfEmpty) setError(listEl, 'Could not load news at this time.');
+        return;
+      }
+      const frag = document.createDocumentFragment();
+      for (const a of articles){
+        if (!a || !a.title) continue;
+        const div = document.createElement("div");
+        div.className = "item";
+        div.innerHTML = `
+          <a href="${a.url}" target="_blank" rel="noopener noreferrer">${a.title}</a>
+          <p>${a.description ? a.description : ""}</p>
+        `;
+        frag.appendChild(div);
+      }
+      listEl.innerHTML = "";
+      listEl.appendChild(frag);
+    }
+
+    function renderMarketData(data){
+      const container = $('#market-ticker');
+      if (!data) return;
+      const fmtChg = (d,dp)=>{
+        const sign = (d??0) >= 0 ? '+' : '';
+        const cls = (d??0) >= 0 ? 'positive' : 'negative';
+        return `<span class="${cls}">${sign}${(d??0).toFixed(2)} (${sign}${(dp??0).toFixed(2)}%)</span>`;
+      };
+      const idx = (data.indices||[]).map(x=>`
+        <div class="index-quote">
+          <div class="name"><a href="https://finance.yahoo.com/quote/${x.ticker}" target="_blank" rel="noopener noreferrer">${x.name||x.ticker}</a></div>
+          <div class="price">${x.c!=null ? x.c.toFixed(2) : 'N/A'}</div>
+          <div class="change">${fmtChg(x.d,x.dp)}</div>
+        </div>
+      `).join('');
+      const movers = Object.entries(data.movers||{}).map(([cat,items])=>`
+        <div class="mover-category">
+          <h3>${cat.toUpperCase()}</h3>
+          <div class="mover-list">
+            ${(items||[]).map(s=>`
+              <div>
+                <span class="ticker"><a href="https://finance.yahoo.com/quote/${s.ticker}" target="_blank" rel="noopener noreferrer">${s.ticker}</a></span>
+                <span class="change">${fmtChg(s.d,s.dp)}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `).join('');
+      container.innerHTML = `
+        <div class="market-indices">${idx}</div>
+        <div class="market-movers">${movers}</div>
+      `;
+    }
+
+    /* ---------------- data fetchers ---------------- */
+    async function fetchMarket(){
+      const r = await fetch('/.netlify/functions/market-data');
+      if (!r.ok) throw new Error(`market ${r.status}`);
+      const json = await r.json();
+      if (json.status!=="ok") throw new Error(json.message||"market error");
+      return json.data;
+    }
+
+    async function fetchNews(section){
+      const r = await fetch(`/.netlify/functions/news?section=${encodeURIComponent(section)}`);
+      if (!r.ok) throw new Error(`news ${section} ${r.status}`);
+      const data = await r.json();
+      // lenient shape
+      const articles = Array.isArray(data?.articles) ? data.articles
+                    : Array.isArray(data?.data?.articles) ? data.data.articles
+                    : [];
+      return articles;
+    }
+
+    async function fetchCerf(){
+      const r = await fetch('/.netlify/functions/substack?mode=archive');
+      const data = await r.json().catch(()=> ({}));
+      if (!r.ok || data.status!=='ok' || !Array.isArray(data.articles)) {
+        throw new Error((data && data.message) ? data.message : ('HTTP '+r.status));
+      }
+      return data.articles.map(a=>({
+        title: a.title || "Untitled",
+        url: a.url,
+        description: a.description || ""
+      }));
+    }
+
+    /* ---------------- update flow (cache-first + error on first-fail) ---------------- */
+    async function updateAll(){
+      const footer = $("#updatedAt");
+      footer.textContent = "Updating…";
+
+      // 1) render from cache first (prevents blanks)
+      const cachedMarket = cache.get("market.data");
+      if (cachedMarket) renderMarketData(cachedMarket);
+
+      const haveCache = {};
+      for (const s of sections){
+        const cached = cache.get(s.cacheKey);
+        haveCache[s.cacheKey] = !!cached;
+        if (cached) render($(`#${s.id} .list`), cached, true);
+      }
+      const cachedCerf = cache.get("cerf.articles");
+      const haveCerfCache = !!cachedCerf;
+      if (cachedCerf) render($("#cerf-card .list"), cachedCerf, true);
+
+      // 2) fetch fresh in parallel
+      const fresh = await Promise.allSettled([
+        fetchMarket(),
+        ...sections.map(s=>fetchNews(s.section)),
+        fetchCerf()
+      ]);
+
+      // market
+      if (fresh[0].status==="fulfilled"){
+        renderMarketData(fresh[0].value);
+        cache.set("market.data", fresh[0].value);
+      } else if (!cachedMarket) {
+        setError($('#market-ticker'), 'Could not load market data.');
+        console.error('Market fetch failed:', fresh[0].reason);
+      }
+
+      // sections
+      sections.forEach((s, i)=>{
+        const res = fresh[i+1];
+        const el = $(`#${s.id} .list`);
+        if (res.status==="fulfilled" && Array.isArray(res.value) && res.value.length){
+          render(el, res.value, false);
+          cache.set(s.cacheKey, res.value);
+        } else if (!haveCache[s.cacheKey]) {
+          setError(el, 'Could not load news at this time.');
+          if (res.status==="rejected") console.error(`News ${s.section} failed:`, res.reason);
+        }
+      });
+
+      // cerf
+      const cerfRes = fresh[1+sections.length];
+      const cerfEl = $("#cerf-card .list");
+      if (cerfRes.status==="fulfilled" && Array.isArray(cerfRes.value) && cerfRes.value.length){
+        render(cerfEl, cerfRes.value, false);
+        cache.set("cerf.articles", cerfRes.value);
+      } else if (!haveCerfCache) {
+        setError(cerfEl, 'Could not load Substack at this time.');
+        if (cerfRes.status==="rejected") console.error('Substack failed:', cerfRes.reason);
+      }
+
+      footer.textContent = "Updated " + new Date().toLocaleString();
+    }
+
+    document.addEventListener("DOMContentLoaded", ()=>{
+      updateAll();
+      setInterval(updateAll, 5*60*1000); // refresh every 5 min
+    });
+  </script>
+</body>
+</html>
