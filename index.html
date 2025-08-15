@@ -79,13 +79,31 @@
       { id: "finance-card", section: "finance" }
     ];
 
-    function $(sel, root=document){ return root.querySelector(sel); }
+    const $ = (sel, root=document) => root.querySelector(sel);
+    const showStatus = (el, msg) => el.innerHTML = '<div class="loading">'+ msg +'</div>';
 
-    function showStatus(el, msg){
-      el.innerHTML = '<div class="loading">'+ msg +'</div>';
+    // ---- Title fallback helpers for Substack ----
+    function fromSlug(url="") {
+      try {
+        const u = new URL(url);
+        const slug = decodeURIComponent(u.pathname.split('/').filter(Boolean).pop() || "");
+        if (!slug) return "";
+        return slug.replace(/[-_]+/g,' ').replace(/\b\w/g, c => c.toUpperCase());
+      } catch { return ""; }
+    }
+    function summarize(text="", n=90) {
+      const t = (text || "").replace(/\s+/g,' ').trim();
+      return t.length > n ? t.slice(0, n-1) + '…' : t;
+    }
+    function safeTitle(a) {
+      if (a.title && a.title.trim()) return a.title.trim();
+      if (a.description && a.description.trim()) return summarize(a.description, 90);
+      const fromURL = fromSlug(a.url);
+      if (fromURL) return fromURL;
+      return "Read on Substack";
     }
 
-    function render(listEl, articles) {
+    function render(listEl, articles, useSafeTitles=false) {
       listEl.innerHTML = "";
       if (!articles || !articles.length) {
         showStatus(listEl, 'Could not load news at this time.');
@@ -93,10 +111,11 @@
       }
       for (const a of articles) {
         if (!a || a.title === "[Removed]") continue;
+        const titleText = useSafeTitles ? safeTitle(a) : (a.title || "");
         const div = document.createElement("div");
         div.className = "item";
         div.innerHTML =
-          '<a href="'+ a.url +'" target="_blank" rel="noopener noreferrer">'+ a.title +'</a>' +
+          '<a href="'+ a.url +'" target="_blank" rel="noopener noreferrer">'+ titleText +'</a>' +
           '<p>' + (a.description ? a.description : '') + '</p>';
         listEl.appendChild(div);
       }
@@ -108,11 +127,9 @@
       try {
         const r = await fetch(url);
         const data = await r.json().catch(()=> ({}));
-        console.log('NEWS', section, r.status, data?.status || 'ok', data);
         if (!r.ok) throw new Error('HTTP '+r.status);
         return data.articles || [];
       } catch (e) {
-        console.error('NEWS error', section, e);
         showStatus(listEl, 'Error: ' + (e.message || e));
         return [];
       }
@@ -123,15 +140,14 @@
       try {
         const r = await fetch(SUBSTACK_FN);
         const data = await r.json().catch(()=> ({}));
-        console.log('CERF', r.status, data);
         if (!r.ok || data.status !== 'ok' || !Array.isArray(data.articles)) {
           throw new Error((data && data.message) ? data.message : ('HTTP '+r.status));
         }
+        // pass through fields; render() will compute a safe title
         return data.articles.map(a => ({
-          title: a.title || '(no title)', url: a.url, description: a.description || ''
+          title: a.title || "", url: a.url, description: a.description || ""
         }));
       } catch (e) {
-        console.error('CERF error', e);
         showStatus(box,
           'Substack error: ' + String(e.message || e).slice(0,140) +
           ' — <a href="https://thecerfreport.substack.com/" target="_blank" rel="noopener noreferrer">open directly</a>');
@@ -144,15 +160,15 @@
       for (const s of sections) { showStatus($('#'+s.id+' .list'), 'Loading…'); }
       showStatus($('#cerf-card .list'), 'Loading…');
 
-      // Fetch in parallel with per-section error surfacing
-      const promises = [
+      // Fetch in parallel
+      const results = await Promise.all([
         ...sections.map(s => fetchNews(s.section)),
         fetchCerf()
-      ];
-      const results = await Promise.all(promises);
+      ]);
 
       sections.forEach((s, i) => render($('#'+s.id+' .list'), results[i]));
-      render($('#cerf-card .list'), results[results.length - 1]);
+      // For Cerf: render with safeTitle fallback
+      render($('#cerf-card .list'), results[results.length - 1], true);
 
       $('#updatedAt').textContent = 'Updated ' + new Date().toLocaleString();
     }
