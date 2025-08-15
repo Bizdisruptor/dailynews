@@ -74,11 +74,11 @@
       { id: "finance-card", section: "finance" },
     ];
 
-    function $(sel, root=document){ return root.querySelector(sel); }
+    const $ = (sel, root=document) => root.querySelector(sel);
 
     function render(listEl, articles) {
       listEl.innerHTML = "";
-      if (!articles || articles.length === 0) {
+      if (!articles || !articles.length) {
         listEl.innerHTML = '<div class="loading">Could not load news at this time.</div>';
         return;
       }
@@ -120,48 +120,40 @@
       return t.length > n ? t.slice(0, n-1) + '…' : t;
     }
 
-<script>
-  // replace your existing fetchCerf() with this
-  async function fetchCerf() {
-    const box = document.querySelector('#cerf-card .list');
-    const url = '/.netlify/functions/substack?feed=https://thecerfreport.substack.com/feed';
-    try {
-      const r = await fetch(url);
-      const data = await r.json().catch(() => ({}));
-      if (!r.ok || data.status !== 'ok' || !Array.isArray(data.articles)) {
-        throw new Error((data && data.message) ? data.message : ('HTTP ' + r.status));
-      }
-      // title fallbacks so you never see "(no title)"
-      const toTitle = (a) => {
-        if (a.title && a.title.trim()) return a.title.trim();
-        if (a.description && a.description.trim()) {
-          const t = a.description.replace(/\s+/g,' ').trim();
-          return t.length > 90 ? t.slice(0, 89) + '…' : t;
+    // ✅ Correct: just the function, no extra <script> tags
+    async function fetchCerf() {
+      const box = document.querySelector('#cerf-card .list');
+      const url = '/.netlify/functions/substack?feed=https://thecerfreport.substack.com/feed';
+      try {
+        const r = await fetch(url);
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok || data.status !== 'ok' || !Array.isArray(data.articles)) {
+          throw new Error((data && data.message) ? data.message : ('HTTP ' + r.status));
         }
-        try {
-          const u = new URL(a.url);
-          const slug = decodeURIComponent(u.pathname.split('/').filter(Boolean).pop() || '');
-          return slug ? slug.replace(/[-_]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : 'Read on Substack';
-        } catch { return 'Read on Substack'; }
-      };
-      return (data.articles || []).map(a => ({
-        title: toTitle(a),
-        url: a.url,
-        description: a.description || ''
-      }));
-    } catch (e) {
-      if (box) {
-        box.innerHTML = `
-          <div class="loading">
-            Substack error: ${String(e.message || e).slice(0,140)}
-            — <a href="https://thecerfreport.substack.com/" target="_blank" rel="noopener noreferrer">open directly</a>
-          </div>`;
+        const toTitle = (a) => {
+          if (a.title && a.title.trim()) return a.title.trim();
+          if (a.description && a.description.trim()) {
+            const t = a.description.replace(/\s+/g,' ').trim();
+            return t.length > 90 ? t.slice(0, 89) + '…' : t;
+          }
+          return slugToTitle(a.url);
+        };
+        return (data.articles || []).map(a => ({
+          title: toTitle(a),
+          url: a.url,
+          description: a.description || ''
+        }));
+      } catch (e) {
+        if (box) {
+          box.innerHTML = `
+            <div class="loading">
+              Substack error: ${String(e.message || e).slice(0,140)}
+              — <a href="https://thecerfreport.substack.com/" target="_blank" rel="noopener noreferrer">open directly</a>
+            </div>`;
+        }
+        return [];
       }
-      return [];
     }
-  }
-</script>
-
 
     async function updateAll() {
       // Loading spinners
@@ -188,5 +180,6 @@
   </script>
 </body>
 </html>
+
 
 
