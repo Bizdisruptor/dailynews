@@ -1,167 +1,162 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Live News Dashboard</title>
-    <style>
-        /* CSS for Styling */
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background-color: #f0f2f5;
-            color: #1c1e21;
-            margin: 0;
-            padding: 20px;
-        }
-        h1 {
-            text-align: center;
-            color: #0056b3;
-        }
-        .dashboard-container {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
-            gap: 20px;
-        }
-        .news-category {
-            background-color: #ffffff;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-            padding: 20px;
-            overflow: hidden;
-        }
-        .news-category h2 {
-            margin-top: 0;
-            border-bottom: 2px solid #0056b3;
-            padding-bottom: 10px;
-        }
-        .article-list {
-            max-height: 500px;
-            overflow-y: auto;
-            padding-right: 10px; /* For scrollbar spacing */
-        }
-        .article {
-            margin-bottom: 15px;
-            border-bottom: 1px solid #ddd;
-            padding-bottom: 15px;
-        }
-        .article:last-child {
-            border-bottom: none;
-            margin-bottom: 0;
-        }
-        .article a {
-            text-decoration: none;
-            color: #0d6efd;
-            font-weight: bold;
-            font-size: 1.1em;
-        }
-        .article a:hover {
-            text-decoration: underline;
-        }
-        .article p {
-            margin: 5px 0 0;
-            color: #606770;
-            font-size: 0.9em;
-        }
-        .loading-spinner {
-            text-align: center;
-            padding: 20px;
-            font-size: 1.2em;
-        }
-    </style>
-</head>
-<body>
+{\rtf1\ansi\ansicpg1252\cocoartf2822
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
 
-    <h1>Today's News Dashboard 📰</h1>
-
-    <div class="dashboard-container">
-        <div id="business-news" class="news-category">
-            <h2>Business</h2>
-            <div class="article-list"></div>
-        </div>
-        <div id="tech-news" class="news-category">
-            <h2>Technology</h2>
-            <div class="article-list"></div>
-        </div>
-        <div id="geopolitics-news" class="news-category">
-            <h2>World News</h2>
-            <div class="article-list"></div>
-        </div>
-        <div id="science-news" class="news-category">
-            <h2>Science</h2>
-            <div class="article-list"></div>
-        </div>
-    </div>
-
-    <script>
-        // 2. JavaScript for Dynamic Updates
-        const apiKey = 'fe79fa11b0b44708906cb4758b419349'; // <-- 🚨 IMPORTANT: Replace with your actual NewsAPI key
-
-        const categories = [
-            { name: 'business', elementId: 'business-news' },
-            { name: 'technology', elementId: 'tech-news' },
-            { name: 'general', elementId: 'geopolitics-news' }, // Using 'general' for broad world news
-            { name: 'science', elementId: 'science-news' }
-        ];
-
-        // Function to fetch news for a specific category
-        async function fetchNews(category) {
-            const url = `https://newsapi.org/v2/top-headlines?country=us&category=${category}&pageSize=10&apiKey=${apiKey}`;
-            try {
-                const response = await fetch(url);
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const data = await response.json();
-                return data.articles;
-            } catch (error) {
-                console.error(`Error fetching ${category} news:`, error);
-                return null; // Return null on error
-            }
-        }
-
-        // Function to render articles into the DOM
-        function renderArticles(articles, elementId) {
-            const container = document.querySelector(`#${elementId} .article-list`);
-            container.innerHTML = ''; // Clear previous content or loading spinner
-
-            if (!articles || articles.length === 0) {
-                container.innerHTML = '<p>Could not load news at this time.</p>';
-                return;
-            }
-
-            articles.forEach(article => {
-                // Skip articles with removed content
-                if (article.title === '[Removed]') return;
-
-                const articleDiv = document.createElement('div');
-                articleDiv.className = 'article';
-                articleDiv.innerHTML = `
-                    <a href="${article.url}" target="_blank" rel="noopener noreferrer">${article.title}</a>
-                    <p>${article.description || 'No summary available.'}</p>
-                `;
-                container.appendChild(articleDiv);
-            });
-        }
-
-        // Main function to fetch and render all news categories
-        async function updateAllNews() {
-            console.log('Updating news...');
-            for (const category of categories) {
-                const articleList = document.querySelector(`#${category.elementId} .article-list`);
-                articleList.innerHTML = '<div class="loading-spinner">Loading...</div>'; // Show loading state
-
-                const articles = await fetchNews(category.name);
-                renderArticles(articles, category.elementId);
-            }
-        }
-
-        // Initial load and refresh interval
-        document.addEventListener('DOMContentLoaded', () => {
-            updateAllNews(); // Fetch news on page load
-            setInterval(updateAllNews, 300000); // Refresh every 5 minutes (300,000 ms)
-        });
-
-    </script>
-
-</body>
-</html>
+\f0\fs24 \cf0 <!DOCTYPE html>\
+<html lang="en">\
+<head>\
+    <meta charset="UTF-8">\
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">\
+    <title>Today's News Dashboard</title>\
+    <style>\
+        body \{\
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;\
+            background-color: #f0f2f5;\
+            color: #1c1e21;\
+            margin: 0;\
+            padding: 20px;\
+        \}\
+        h1 \{\
+            text-align: center;\
+            color: #0056b3;\
+        \}\
+        .dashboard-container \{\
+            display: grid;\
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));\
+            gap: 20px;\
+        \}\
+        .news-category \{\
+            background-color: #ffffff;\
+            border-radius: 8px;\
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);\
+            padding: 20px;\
+            overflow: hidden;\
+        \}\
+        .news-category h2 \{\
+            margin-top: 0;\
+            border-bottom: 2px solid #0056b3;\
+            padding-bottom: 10px;\
+        \}\
+        .article-list \{\
+            max-height: 500px;\
+            overflow-y: auto;\
+            padding-right: 10px;\
+        \}\
+        .article \{\
+            margin-bottom: 15px;\
+            border-bottom: 1px solid #ddd;\
+            padding-bottom: 15px;\
+        \}\
+        .article:last-child \{\
+            border-bottom: none;\
+            margin-bottom: 0;\
+        \}\
+        .article a \{\
+            text-decoration: none;\
+            color: #0d6efd;\
+            font-weight: bold;\
+            font-size: 1.1em;\
+        \}\
+        .article a:hover \{\
+            text-decoration: underline;\
+        \}\
+        .article p \{\
+            margin: 5px 0 0;\
+            color: #606770;\
+            font-size: 0.9em;\
+        \}\
+        .loading-spinner \{\
+            text-align: center;\
+            padding: 20px;\
+            font-size: 1.2em;\
+        \}\
+    </style>\
+</head>\
+<body>\
+\
+    <h1>Today's News Dashboard \uc0\u55357 \u56560 </h1>\
+\
+    <div class="dashboard-container">\
+        <div id="business-news" class="news-category">\
+            <h2>Business</h2>\
+            <div class="article-list"></div>\
+        </div>\
+        <div id="tech-news" class="news-category">\
+            <h2>Technology</h2>\
+            <div class="article-list"></div>\
+        </div>\
+        <div id="geopolitics-news" class="news-category">\
+            <h2>World News</h2>\
+            <div class="article-list"></div>\
+        </div>\
+        <div id="science-news" class="news-category">\
+            <h2>Science</h2>\
+            <div class="article-list"></div>\
+        </div>\
+    </div>\
+\
+    <script>\
+        const categories = [\
+            \{ name: 'business', elementId: 'business-news' \},\
+            \{ name: 'technology', elementId: 'tech-news' \},\
+            \{ name: 'general', elementId: 'geopolitics-news' \},\
+            \{ name: 'science', elementId: 'science-news' \}\
+        ];\
+\
+        // Updated to call Netlify function directly\
+        async function fetchNews(category) \{\
+            const url = `/.netlify/functions/news?category=$\{encodeURIComponent(category)\}`;\
+            try \{\
+                const response = await fetch(url);\
+                if (!response.ok) throw new Error(`HTTP error! status: $\{response.status\}`);\
+                const data = await response.json();\
+                return data.articles;\
+            \} catch (error) \{\
+                console.error(`Error fetching $\{category\} news:`, error);\
+                return null;\
+            \}\
+        \}\
+\
+        function renderArticles(articles, elementId) \{\
+            const container = document.querySelector(`#$\{elementId\} .article-list`);\
+            container.innerHTML = '';\
+\
+            if (!articles || articles.length === 0) \{\
+                container.innerHTML = '<p>Could not load news at this time.</p>';\
+                return;\
+            \}\
+\
+            articles.forEach(article => \{\
+                if (article.title === '[Removed]') return;\
+\
+                const articleDiv = document.createElement('div');\
+                articleDiv.className = 'article';\
+                articleDiv.innerHTML = `\
+                    <a href="$\{article.url\}" target="_blank" rel="noopener noreferrer">$\{article.title\}</a>\
+                    <p>$\{article.description || 'No summary available.'\}</p>\
+                `;\
+                container.appendChild(articleDiv);\
+            \});\
+        \}\
+\
+        async function updateAllNews() \{\
+            for (const category of categories) \{\
+                const articleList = document.querySelector(`#$\{category.elementId\} .article-list`);\
+                articleList.innerHTML = '<div class="loading-spinner">Loading...</div>';\
+                const articles = await fetchNews(category.name);\
+                renderArticles(articles, category.elementId);\
+            \}\
+        \}\
+\
+        document.addEventListener('DOMContentLoaded', () => \{\
+            updateAllNews();\
+            setInterval(updateAllNews, 300000);\
+        \});\
+    </script>\
+\
+</body>\
+</html>\
+}
