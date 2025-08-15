@@ -28,9 +28,7 @@
 </head>
 <body>
   <h1>The Cerf Report — Curated News</h1>
-  <div class="subhead">
-    Front page like Drudge, minus the junk. TechCrunch heat, top finance, and your Substack.
-  </div>
+  <div class="subhead">Front page like Drudge, minus the junk. TechCrunch heat, top finance, and your Substack.</div>
 
   <div class="grid">
     <div class="card" id="front-card">
@@ -54,5 +52,116 @@
     </div>
 
     <div class="card" id="cerf-card">
-      <h2>The Cerf
+      <h2>The Cerf Report</h2>
+      <!-- Link directly under the column title -->
+      <div class="section-link">
+        <a href="https://thecerfreport.substack.com/" target="_blank" rel="noopener noreferrer">
+          thecerfreport.substack.com →
+        </a>
+      </div>
+      <div class="list"></div>
+    </div>
+  </div>
+
+  <div class="footer" id="updatedAt"></div>
+
+  <script>
+    // Sections served by your Netlify "news" function
+    const sections = [
+      { id: "front-card",   section: "frontpage" },
+      { id: "tech-card",    section: "tech" },
+      { id: "world-card",   section: "world" },
+      { id: "finance-card", section: "finance" },
+    ];
+
+    function $(sel, root=document){ return root.querySelector(sel); }
+
+    function render(listEl, articles) {
+      listEl.innerHTML = "";
+      if (!articles || articles.length === 0) {
+        listEl.innerHTML = '<div class="loading">Could not load news at this time.</div>';
+        return;
+      }
+      for (const a of articles) {
+        if (!a || a.title === "[Removed]") continue;
+        const div = document.createElement("div");
+        div.className = "item";
+        div.innerHTML = `
+          <a href="${a.url}" target="_blank" rel="noopener noreferrer">${a.title}</a>
+          <p>${a.description ? a.description : ""}</p>
+        `;
+        listEl.appendChild(div);
+      }
+    }
+
+    async function fetchNews(section) {
+      const url = `/.netlify/functions/news?section=${encodeURIComponent(section)}`;
+      try {
+        const r = await fetch(url);
+        if (!r.ok) throw new Error(`News ${section} HTTP ${r.status}`);
+        const data = await r.json();
+        return data.articles || [];
+      } catch {
+        return [];
+      }
+    }
+
+    // ---- Substack helpers: derive a readable title if missing ----
+    function slugToTitle(url="") {
+      try {
+        const u = new URL(url);
+        const slug = decodeURIComponent(u.pathname.split('/').filter(Boolean).pop() || "");
+        if (!slug) return "Read on Substack";
+        return slug.replace(/[-_]+/g,' ').replace(/\b\w/g, c => c.toUpperCase());
+      } catch { return "Read on Substack"; }
+    }
+    function clip(s="", n=90) {
+      const t = s.replace(/\s+/g,' ').trim();
+      return t.length > n ? t.slice(0, n-1) + '…' : t;
+    }
+
+    async function fetchCerf() {
+      try {
+        const r = await fetch('/.netlify/functions/substack?feed=https://thecerfreport.substack.com/feed');
+        if (!r.ok) return [];
+        const data = await r.json().catch(() => ({}));
+        if (!data || data.status !== 'ok') return [];
+        // Compute a safe title here so the UI never shows "(no title)"
+        return (data.articles || []).map(a => {
+          const title = (a.title && a.title.trim())
+            ? a.title.trim()
+            : ((a.description && a.description.trim()) ? clip(a.description) : slugToTitle(a.url));
+          return { title, url: a.url, description: a.description || "" };
+        });
+      } catch {
+        return [];
+      }
+    }
+
+    async function updateAll() {
+      // Loading spinners
+      for (const s of sections) { $(`#${s.id} .list`).innerHTML = '<div class="loading">Loading…</div>'; }
+      $("#cerf-card .list").innerHTML = '<div class="loading">Loading…</div>';
+
+      // Fetch in parallel
+      const results = await Promise.all([
+        ...sections.map(s => fetchNews(s.section).catch(() => [])),
+        fetchCerf().catch(() => [])
+      ]);
+
+      // Render
+      sections.forEach((s, i) => render($(`#${s.id} .list`), results[i]));
+      render($("#cerf-card .list"), results[results.length - 1]);
+
+      $("#updatedAt").textContent = "Updated " + new Date().toLocaleString();
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+      updateAll();
+      setInterval(updateAll, 5 * 60 * 1000);
+    });
+  </script>
+</body>
+</html>
+
 
