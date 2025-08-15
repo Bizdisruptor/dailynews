@@ -1,6 +1,6 @@
-// netlify/functions/market-data.js (CommonJS)
-// Aggregates quotes from Yahoo Finance and returns macro + sector movers.
-// Falls back to cached data in /tmp so the page never goes blank.
+// netlify/functions/market-data.js  (CommonJS)
+// Yahoo Finance quotes -> indices + movers + macro
+// Falls back to cached payload in /tmp so the UI never blanks.
 
 const HEADERS = {
   "Content-Type": "application/json",
@@ -9,29 +9,45 @@ const HEADERS = {
 
 const CACHE_FILE = "/tmp/market-data-cache.json";
 
-// ----- Symbol sets -----------------------------------------------------------
+// ----- Symbols ---------------------------------------------------------------
 
-// Macro bar: Bitcoin, Gold futures, 10-year Treasury yield (^TNX)
+// Macro bar: Bitcoin, Gold futures, 10-year yield
 const MACRO = ["BTC-USD", "GC=F", "^TNX"];
 
-// Major indices (use ^DJI ^GSPC ^IXIC which Yahoo provides without keys)
+// Major US indices
 const INDICES = ["^DJI", "^GSPC", "^IXIC"];
 
-// Buckets for the grid (each item is a Yahoo symbol)
+// Movers buckets
 const AI = ["NVDA", "MSFT", "AAPL", "GOOGL", "AMD", "SMCI", "AVGO", "META", "TSLA", "PLTR"];
 const CRYPTO = ["COIN", "MSTR", "MARA", "RIOT", "CLSK"];
 const ENERGY = ["XOM", "CVX", "SLB", "OXY", "COP"];
 
-// ----- Helpers ---------------------------------------------------------------
+// Friendly names for a few symbols
+const FRIENDLY = {
+  "^DJI": "Dow Jones",
+  "^GSPC": "S&P 500",
+  "^IXIC": "NASDAQ",
+  "GC=F": "Gold",
+  "^TNX": "10Y",
+  "BTC-USD": "Bitcoin",
+};
 
-function pickFields(q) {
-  // Normalize to the shape the front-end expects
+function friendlyName(q) {
+  return (
+    FRIENDLY[q.symbol] ||
+    q.shortName ||
+    q.longName ||
+    q.symbol
+  );
+}
+
+function norm(q) {
   return {
     ticker: q.symbol,
-    name: q.shortName || q.longName || q.symbol,
-    c: q.regularMarketPrice,                    // current
-    d: q.regularMarketChange,                   // change
-    dp: q.regularMarketChangePercent,           // % change
+    name: friendlyName(q),
+    c: q.regularMarketPrice,
+    d: q.regularMarketChange,
+    dp: q.regularMarketChangePercent,
     t: q.regularMarketTime || q.postMarketTime || q.preMarketTime || null,
   };
 }
@@ -50,22 +66,14 @@ async function yahooQuotes(symbols) {
   });
   if (!res.ok) throw new Error(`Yahoo HTTP ${res.status}`);
   const json = await res.json();
-  const rows = json?.quoteResponse?.result || [];
-  return rows.map(pickFields);
-}
-
-function mapBySymbol(quotes) {
-  const m = new Map();
-  for (const q of quotes) m.set(q.ticker, q);
-  return m;
+  return (json?.quoteResponse?.result || []).map(norm);
 }
 
 function readCache() {
   try {
     const fs = require("fs");
     if (fs.existsSync(CACHE_FILE)) {
-      const raw = fs.readFileSync(CACHE_FILE, "utf8");
-      return JSON.parse(raw);
+      return JSON.parse(fs.readFileSync(CACHE_FILE, "utf8"));
     }
   } catch (_) {}
   return null;
@@ -78,35 +86,36 @@ function writeCache(payload) {
   } catch (_) {}
 }
 
-// ----- Handler ---------------------------------------------------------------
-
 exports.handler = async function () {
   try {
-    // Fetch everything in one Yahoo call
-    const allSymbols = [...new Set([...MACRO, ...INDICES, ...AI, ...CRYPTO, ...ENERGY])];
-    const quotes = await yahooQuotes(allSymbols);
-    const bySym = mapBySymbol(quotes);
+    const all = [...new Set([...MACRO, ...INDICES, ...AI, ...CRYPTO, ...ENERGY])];
+    const quotes = await yahooQuotes(all);
 
-    const payload = {
-      macro: MACRO.map(s => bySym.get(s)).filter(Boolean),
-      indices: INDICES.map(s => bySym.get(s)).filter(Boolean),
-      ai: AI.map(s => bySym.get(s)).filter(Boolean),
-      crypto: CRYPTO.map(s => bySym.get(s)).filter(Boolean),
-      energy: ENERGY.map(s => bySym.get(s)).filter(Boolean),
+    const by = new Map(quotes.map(q => [q.ticker, q]));
+
+    const data = {
+      // new: macro for BTC/Gold/10Y (you can render or ignore on the UI)
+      macro: MACRO.map(s => by.get(s)).filter(Boolean),
+
+      // matches your front-end expectation:
+      indices: INDICES.map(s => by.get(s)).filter(Boolean),
+      movers: {
+        ai: AI.map(s => by.get(s)).filter(Boolean),
+        crypto: CRYPTO.map(s => by.get(s)).filter(Boolean),
+        energy: ENERGY.map(s => by.get(s)).filter(Boolean),
+      },
       ts: Date.now(),
       source: "live",
     };
 
-    // persist in /tmp so we can serve stale on outages
-    writeCache(payload);
+    writeCache(data);
 
     return {
       statusCode: 200,
       headers: HEADERS,
-      body: JSON.stringify({ status: "ok", data: payload }),
+      body: JSON.stringify({ status: "ok", data }),
     };
   } catch (e) {
-    // On failure, try to serve the last good payload
     const cached = readCache();
     if (cached) {
       cached.source = "cache";
