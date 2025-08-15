@@ -1,8 +1,10 @@
-// Robust Substack RSS → JSON for The Cerf Report
-function unescapeHtml(s=""){
-  return s.replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&amp;/g,"&");
+// netlify/functions/substack.js
+// Fetch The Cerf Report via RSS (preferred) with a fallback to archive JSON.
+
+function unescapeHtml(s = "") {
+  return s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 }
-function stripTags(s=""){
+function stripTags(s = "") {
   return s.replace(/<\/?[^>]+(>|$)/g, "").trim();
 }
 function parseRss(xml) {
@@ -20,48 +22,82 @@ function parseRss(xml) {
       title: stripTags(pick("title")),
       url: pick("link"),
       publishedAt: pick("pubDate"),
-      description: stripTags(pick("description"))
+      description: stripTags(pick("description")),
     });
   }
   return items;
 }
 
+async function tryRSS(feedUrl) {
+  const r = await fetch(feedUrl, {
+    headers: {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
+      Accept: "application/rss+xml, application/xml;q=0.9, */*;q=0.8",
+      "Cache-Control": "no-cache",
+      Referer: feedUrl,
+    },
+  });
+  if (!r.ok) throw new Error("rss " + r.status);
+  const xml = await r.text();
+  const items = parseRss(xml);
+  if (!items.length) throw new Error("rss empty");
+  return items;
+}
+
+async function tryArchiveJSON(pubHost) {
+  // Example: https://thecerfreport.substack.com/api/v1/archive?sort=new
+  const url = `https://${pubHost}/api/v1/archive?sort=new`;
+  const r = await fetch(url, {
+    headers: {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
+      Accept: "application/json",
+    },
+  });
+  if (!r.ok) throw new Error("archive " + r.status);
+  const posts = await r.json();
+  // Map to the same shape the frontend expects
+  return posts.slice(0, 10).map((p) => ({
+    title: stripTags(p.title || p.headline || ""),
+    url: p.canonical_url || `https://${pubHost}/p/${p.slug}`,
+    publishedAt: p.post_date || p.published_at || "",
+    description: stripTags(p.subtitle || p.description || ""),
+  }));
+}
+
 export async function handler(event) {
   try {
-    const feed = event.queryStringParameters?.feed
-      || "https://thecerfreport.substack.com/feed";
+    const feed =
+      event.queryStringParameters?.feed ||
+      "https://thecerfreport.substack.com/feed";
+    const pubHost = new URL(feed).host; // thecerfreport.substack.com
 
-    const r = await fetch(feed, {
-      // Substack/Cloudflare are friendlier with a browsery UA + Accept header
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
-        "Accept": "application/rss+xml, application/xml;q=0.9, */*;q=0.8",
-        "Cache-Control": "no-cache"
-      }
-    });
-
-    if (!r.ok) {
-      const text = await r.text();
-      return {
-        statusCode: r.status,
-        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-        body: JSON.stringify({ status: "error", message: text.slice(0, 500) })
-      };
+    let articles = [];
+    try {
+      articles = await tryRSS(feed);
+    } catch (_) {
+      // Fallback to archive JSON if RSS is blocked/empty
+      articles = await tryArchiveJSON(pubHost);
     }
-
-    const xml = await r.text();
-    const articles = parseRss(xml).slice(0, 10);
 
     return {
       statusCode: 200,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-      body: JSON.stringify({ status: "ok", articles })
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+      },
+      body: JSON.stringify({ status: "ok", articles }),
     };
   } catch (e) {
     return {
       statusCode: 500,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-      body: JSON.stringify({ status: "error", message: e.message })
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+      },
+      body: JSON.stringify({ status: "error", message: e.message }),
     };
   }
 }
+
