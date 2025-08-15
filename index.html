@@ -1,154 +1,128 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Today's News Dashboard</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background-color: #f0f2f5;
-            color: #1c1e21;
-            margin: 0;
-            padding: 20px;
-        }
-        h1 {
-            text-align: center;
-            color: #0056b3;
-        }
-        .dashboard-container {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
-            gap: 20px;
-        }
-        .news-category {
-            background-color: #ffffff;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-            padding: 20px;
-            overflow: hidden;
-        }
-        .news-category h2 {
-            margin-top: 0;
-            border-bottom: 2px solid #0056b3;
-            padding-bottom: 10px;
-        }
-        .article-list {
-            max-height: 500px;
-            overflow-y: auto;
-            padding-right: 10px;
-        }
-        .article {
-            margin-bottom: 15px;
-            border-bottom: 1px solid #ddd;
-            padding-bottom: 15px;
-        }
-        .article:last-child {
-            border-bottom: none;
-            margin-bottom: 0;
-        }
-        .article a {
-            text-decoration: none;
-            color: #0d6efd;
-            font-weight: bold;
-            font-size: 1.1em;
-        }
-        .article a:hover {
-            text-decoration: underline;
-        }
-        .article p {
-            margin: 5px 0 0;
-            color: #606770;
-            font-size: 0.9em;
-        }
-        .loading-spinner {
-            text-align: center;
-            padding: 20px;
-            font-size: 1.2em;
-        }
-    </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>The Cerf Report — Curated News</title>
+  <style>
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:#f0f2f5;color:#1c1e21;margin:0;padding:20px}
+    h1{text-align:center;color:#0056b3;margin-bottom:16px}
+    .subhead{text-align:center;color:#606770;margin:-6px 0 22px;font-size:.95rem}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:20px}
+    .card{background:#fff;border-radius:10px;box-shadow:0 2px 6px rgba(0,0,0,.08);padding:18px;overflow:hidden}
+    .card h2{margin:0 0 10px;border-bottom:2px solid #0056b3;padding-bottom:8px;font-size:1.15rem}
+    .list{max-height:520px;overflow-y:auto;padding-right:10px}
+    .item{margin:0 0 14px;border-bottom:1px solid #eee;padding:0 0 12px}
+    .item:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0}
+    .item a{color:#0d6efd;text-decoration:none;font-weight:600}
+    .item a:hover{text-decoration:underline}
+    .item p{margin:6px 0 0;color:#606770;font-size:.92rem;line-height:1.35}
+    .loading{text-align:center;padding:16px;color:#606770}
+    .footer{margin-top:18px;text-align:center;color:#8a8f98;font-size:.85rem}
+  </style>
 </head>
 <body>
+  <h1>The Cerf Report — Curated News</h1>
+  <div class="subhead">Front page like Drudge, minus the junk. TechCrunch heat, top finance, and your Substack.</div>
 
-    <h1>Today's News Dashboard 📰</h1>
-
-    <div class="dashboard-container">
-        <div id="business-news" class="news-category">
-            <h2>Business</h2>
-            <div class="article-list"></div>
-        </div>
-        <div id="tech-news" class="news-category">
-            <h2>Technology</h2>
-            <div class="article-list"></div>
-        </div>
-        <div id="geopolitics-news" class="news-category">
-            <h2>World News</h2>
-            <div class="article-list"></div>
-        </div>
-        <div id="science-news" class="news-category">
-            <h2>Science</h2>
-            <div class="article-list"></div>
-        </div>
+  <div class="grid">
+    <div class="card" id="front-card">
+      <h2>Front Page</h2>
+      <div class="list"></div>
     </div>
 
-    <script>
-        const categories = [
-            { name: 'business', elementId: 'business-news' },
-            { name: 'technology', elementId: 'tech-news' },
-            { name: 'general', elementId: 'geopolitics-news' },
-            { name: 'science', elementId: 'science-news' }
-        ];
+    <div class="card" id="tech-card">
+      <h2>Technology</h2>
+      <div class="list"></div>
+    </div>
 
-        // Updated to call Netlify function directly
-        async function fetchNews(category) {
-            const url = `/.netlify/functions/news?category=${encodeURIComponent(category)}`;
-            try {
-                const response = await fetch(url);
-                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-                const data = await response.json();
-                return data.articles;
-            } catch (error) {
-                console.error(`Error fetching ${category} news:`, error);
-                return null;
-            }
-        }
+    <div class="card" id="world-card">
+      <h2>World News</h2>
+      <div class="list"></div>
+    </div>
 
-        function renderArticles(articles, elementId) {
-            const container = document.querySelector(`#${elementId} .article-list`);
-            container.innerHTML = '';
+    <div class="card" id="finance-card">
+      <h2>Finance</h2>
+      <div class="list"></div>
+    </div>
 
-            if (!articles || articles.length === 0) {
-                container.innerHTML = '<p>Could not load news at this time.</p>';
-                return;
-            }
+    <div class="card" id="cerf-card">
+      <h2>The Cerf Report</h2>
+      <div class="list"></div>
+    </div>
+  </div>
 
-            articles.forEach(article => {
-                if (article.title === '[Removed]') return;
+  <div class="footer" id="updatedAt"></div>
 
-                const articleDiv = document.createElement('div');
-                articleDiv.className = 'article';
-                articleDiv.innerHTML = `
-                    <a href="${article.url}" target="_blank" rel="noopener noreferrer">${article.title}</a>
-                    <p>${article.description || 'No summary available.'}</p>
-                `;
-                container.appendChild(articleDiv);
-            });
-        }
+  <script>
+    // Which sections to load from /functions/news
+    const sections = [
+      { id: "front-card",   section: "frontpage" },
+      { id: "tech-card",    section: "tech" },
+      { id: "world-card",   section: "world" },
+      { id: "finance-card", section: "finance" },
+    ];
 
-        async function updateAllNews() {
-            for (const category of categories) {
-                const articleList = document.querySelector(`#${category.elementId} .article-list`);
-                articleList.innerHTML = '<div class="loading-spinner">Loading...</div>';
-                const articles = await fetchNews(category.name);
-                renderArticles(articles, category.elementId);
-            }
-        }
+    function $(sel, root=document){ return root.querySelector(sel); }
 
-        document.addEventListener('DOMContentLoaded', () => {
-            updateAllNews();
-            setInterval(updateAllNews, 300000);
-        });
-    </script>
+    function render(listEl, articles) {
+      listEl.innerHTML = "";
+      if (!articles || articles.length === 0) {
+        listEl.innerHTML = '<div class="loading">Could not load news at this time.</div>';
+        return;
+      }
+      for (const a of articles) {
+        if (!a || a.title === "[Removed]") continue;
+        const div = document.createElement("div");
+        div.className = "item";
+        div.innerHTML = `
+          <a href="${a.url}" target="_blank" rel="noopener noreferrer">${a.title}</a>
+          <p>${a.description ? a.description : ""}</p>
+        `;
+        listEl.appendChild(div);
+      }
+    }
 
+    async function fetchNews(section) {
+      const url = `/.netlify/functions/news?section=${encodeURIComponent(section)}`;
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(`News ${section} HTTP ${r.status}`);
+      const data = await r.json();
+      return data.articles || [];
+    }
+
+    async function fetchCerf() {
+      const r = await fetch('/.netlify/functions/substack');
+      if (!r.ok) throw new Error("Substack fetch failed");
+      const data = await r.json();
+      return (data.articles || []).map(a => ({
+        title: a.title,
+        url: a.url,
+        description: a.description || ""
+      }));
+    }
+
+    async function updateAll() {
+      // Loading spinners
+      for (const s of sections) { $(`#${s.id} .list`).innerHTML = '<div class="loading">Loading…</div>'; }
+      $("#cerf-card .list").innerHTML = '<div class="loading">Loading…</div>';
+
+      // Fetch in parallel
+      const newsPromises = sections.map(s => fetchNews(s.section).catch(() => []));
+      const cerfPromise = fetchCerf().catch(() => []);
+
+      const results = await Promise.all([...newsPromises, cerfPromise]);
+      sections.forEach((s, i) => render($(`#${s.id} .list`), results[i]));
+      render($("#cerf-card .list"), results[results.length - 1]);
+
+      $("#updatedAt").textContent = "Updated " + new Date().toLocaleString();
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+      updateAll();
+      setInterval(updateAll, 5 * 60 * 1000);
+    });
+  </script>
 </body>
 </html>
+
