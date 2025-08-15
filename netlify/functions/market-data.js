@@ -1,162 +1,111 @@
 // netlify/functions/market-data.js
-// Round-robin providers: Finnhub (if key) -> Yahoo Finance -> /tmp cache
-// No external packages required.
+// CommonJS version (works on Netlify without "type": "module").
+// Fetches quotes from Yahoo Finance (no API key) and normalizes to:
+//  indices: [{ ticker, name, c, d, dp }]
+//  movers: { ai: [...], crypto: [...], energy: [...] }
 
-const YF_URL = "https://query1.finance.yahoo.com/v7/finance/quote";
-const FINNHUB_URL = "https://finnhub.io/api/v1/quote";
-const CACHE_PATH = "/tmp/market-cache.json";
+const HEADERS = {
+  "Content-Type": "application/json",
+  "Access-Control-Allow-Origin": "*"
+};
 
-// Buckets expected by the front-end
-const TICKERS = {
-  indices: ["DIA", "SPY", "QQQ"], // Dow (DIA), S&P 500 (SPY), NASDAQ (QQQ)
-  ai: ["NVDA", "MSFT", "GOOG", "AMD", "SMCI"],
-  crypto: ["COIN", "MSTR", "MARA", "RIOT", "CLSK"], // crypto-exposed equities
+// Choose ETFs for indices so we don't need the ^ symbols
+const GROUPS = {
+  indices: ["SPY", "DIA", "QQQ"],                       // S&P 500, Dow, Nasdaq 100
+  ai: ["NVDA", "MSFT", "GOOGL", "AMD", "SMCI", "AVGO", "PLTR"],
+  crypto: ["BTC-USD", "ETH-USD", "COIN", "MSTR", "MARA", "RIOT"],
   energy: ["XOM", "CVX", "SLB", "OXY", "COP"]
 };
 
+// Optional nicer display names for indices
 const DISPLAY_NAMES = {
-  DIA: "Dow Jones",
-  SPY: "S&P 500",
-  QQQ: "NASDAQ"
+  SPY: "S&P 500 (SPY)",
+  DIA: "Dow (DIA)",
+  QQQ: "Nasdaq 100 (QQQ)"
 };
 
-/* ----------------- tiny cache helpers (/tmp) ----------------- */
-async function readCache() {
-  try {
-    const { readFile } = await import("node:fs/promises");
-    const text = await readFile(CACHE_PATH, "utf8");
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-}
-async function writeCache(obj) {
-  try {
-    const { writeFile } = await import("node:fs/promises");
-    await writeFile(CACHE_PATH, JSON.stringify(obj));
-  } catch {
-    // ignore cache write errors
-  }
-}
+async function fetchYahooQuotes(symbolsCsv) {
+  const url =
+    "https://query1.finance.yahoo.com/v7/finance/quote?symbols=" +
+    encodeURIComponent(symbolsCsv);
 
-/* ----------------- Providers ----------------- */
-async function finnhubQuote(ticker, key) {
-  const r = await fetch(`${FINNHUB_URL}?symbol=${encodeURIComponent(ticker)}&token=${key}`);
-  if (!r.ok) throw new Error(`Finnhub ${ticker} ${r.status}`);
-  const d = await r.json();
-
-  // Finnhub fields: c=current, d=change, dp=%change
-  if (d == null || d.c == null) throw new Error(`Finnhub empty ${ticker}`);
-
-  return {
-    ticker,
-    name: DISPLAY_NAMES[ticker] || ticker,
-    c: d.c,
-    d: d.d ?? 0,
-    dp: d.dp ?? 0
-  };
-}
-
-async function yahooQuotes(symbols) {
-  const url = `${YF_URL}?symbols=${encodeURIComponent(symbols.join(","))}`;
   const r = await fetch(url, {
     headers: {
+      // Yahoo is friendlier with a browser User-Agent + Accept
       "User-Agent":
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
       Accept: "application/json"
     }
   });
-  if (!r.ok) throw new Error(`Yahoo ${r.status}`);
-  const raw = await r.json();
-  const rows = raw?.quoteResponse?.result || [];
 
-  const map = new Map();
-  for (const q of rows) {
-    map.set(q.symbol, {
-      ticker: q.symbol,
-      name: DISPLAY_NAMES[q.symbol] || q.shortName || q.longName || q.symbol,
-      c: q.regularMarketPrice ?? null,
-      d: q.regularMarketChange ?? 0,
-      dp: q.regularMarketChangePercent ?? 0
-    });
+  const text = await r.text();
+  if (!r.ok) {
+    throw new Error(text.slice(0, 400));
   }
-  return map;
+
+  const json = JSON.parse(text);
+  return json.quoteResponse?.result || [];
 }
 
-/* ----------------- Response builder ----------------- */
-function buildResponse(map) {
-  const pick = (arr) => arr.map((t) => map.get(t)).filter(Boolean);
+function normalizeQuote(q) {
   return {
-    indices: pick(TICKERS.indices),
-    movers: {
-      ai: pick(TICKERS.ai),
-      crypto: pick(TICKERS.crypto),
-      energy: pick(TICKERS.energy)
-    }
+    ticker: q.symbol,
+    name: q.shortName || q.longName || q.symbol,
+    c: q.regularMarketPrice ?? null,
+    d: q.regularMarketChange ?? null,
+    dp: q.regularMarketChangePercent ?? null
   };
 }
 
-/* ----------------- Handler ----------------- */
-export async function handler() {
-  const headers = {
-    "Content-Type": "application/json",
-    "Access-Control-Allow-Origin": "*"
-  };
+function pickGroup(map, arr) {
+  // Keep the original ticker + allow display name override for indices
+  return arr
+    .map((sym) => {
+      const q = map.get(sym);
+      if (!q) return null;
+      return {
+        ...q,
+        ticker: sym,
+        name: DISPLAY_NAMES[sym] || q.name || sym
+      };
+    })
+    .filter(Boolean);
+}
 
+exports.handler = async function handler() {
   try {
-    const all = [
-      ...new Set([
-        ...TICKERS.indices,
-        ...TICKERS.ai,
-        ...TICKERS.crypto,
-        ...TICKERS.energy
-      ])
-    ];
+    // Build a unique symbol list across all groups
+    const allSymbols = [
+      ...new Set(Object.values(GROUPS).flat())
+    ].join(",");
 
-    // 1) Finnhub first (if key present)
-    const key = process.env.FINNHUB_API_KEY;
-    if (key) {
-      try {
-        const results = await Promise.all(all.map((t) => finnhubQuote(t, key)));
-        const map = new Map(results.map((r) => [r.ticker, r]));
-        const data = buildResponse(map);
-        await writeCache(data);
-        return {
-          statusCode: 200,
-          headers,
-          body: JSON.stringify({ status: "ok", data, source: "finnhub" })
-        };
-      } catch (e) {
-        console.warn("Finnhub failed, falling back to Yahoo:", e.message);
+    // Fetch quotes once, then split into groups
+    const results = await fetchYahooQuotes(allSymbols);
+
+    const bySymbol = new Map();
+    for (const q of results) {
+      bySymbol.set(q.symbol, normalizeQuote(q));
+    }
+
+    const data = {
+      indices: pickGroup(bySymbol, GROUPS.indices),
+      movers: {
+        ai: pickGroup(bySymbol, GROUPS.ai),
+        crypto: pickGroup(bySymbol, GROUPS.crypto),
+        energy: pickGroup(bySymbol, GROUPS.energy)
       }
-    }
+    };
 
-    // 2) Yahoo fallback
-    try {
-      const map = await yahooQuotes(all);
-      const data = buildResponse(map);
-      await writeCache(data);
-      return {
-        statusCode: 200,
-        headers,
-        body: JSON.stringify({ status: "ok", data, source: "yahoo" })
-      };
-    } catch (e) {
-      console.warn("Yahoo failed, trying /tmp cache:", e.message);
-    }
-
-    // 3) /tmp cache last resort
-    const cached = await readCache();
-    if (cached) {
-      return {
-        statusCode: 200,
-        headers,
-        body: JSON.stringify({ status: "ok", data: cached, source: "cache" })
-      };
-    }
-
-    // All providers failed
     return {
-      statusCode: 502,
-      headers,
-      body: JSON.stringify({ status: "error", message: "All market
+      statusCode: 200,
+      headers: HEADERS,
+      body: JSON.stringify({ status: "ok", data })
+    };
+  } catch (e) {
+    return {
+      statusCode: 500,
+      headers: HEADERS,
+      body: JSON.stringify({ status: "error", message: e.message })
+    };
+  }
+};
