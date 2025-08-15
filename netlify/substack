@@ -1,23 +1,26 @@
- // netlify/functions/substack.js
-// Minimal Substack RSS -> JSON for The Cerf Report
-function unescapeHtml(s=""){return s.replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&amp;/g,"&");}
-
+// Robust Substack RSS → JSON for The Cerf Report
+function unescapeHtml(s=""){
+  return s.replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&amp;/g,"&");
+}
+function stripTags(s=""){
+  return s.replace(/<\/?[^>]+(>|$)/g, "").trim();
+}
 function parseRss(xml) {
   const items = [];
   const itemRegex = /<item>([\s\S]*?)<\/item>/g;
   let m;
   while ((m = itemRegex.exec(xml))) {
     const b = m[1];
-    const get = (tag) => {
-      const rx = new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`, "i");
+    const pick = (tag) => {
+      const rx = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i");
       const mm = rx.exec(b);
       return mm ? unescapeHtml(mm[1].trim()) : "";
     };
     items.push({
-      title: get("title"),
-      url: get("link"),
-      publishedAt: get("pubDate"),
-      description: get("description")
+      title: stripTags(pick("title")),
+      url: pick("link"),
+      publishedAt: pick("pubDate"),
+      description: stripTags(pick("description"))
     });
   }
   return items;
@@ -25,22 +28,40 @@ function parseRss(xml) {
 
 export async function handler(event) {
   try {
-    const feed =
-      event.queryStringParameters?.feed ||
-      "https://thecerfreport.substack.com/feed";
+    const feed = event.queryStringParameters?.feed
+      || "https://thecerfreport.substack.com/feed";
 
-    const r = await fetch(feed, { headers: { "User-Agent": "cerfreport-news/1.0" } });
-    if (!r.ok) return { statusCode: r.status, body: await r.text() };
+    const r = await fetch(feed, {
+      // Substack/Cloudflare are friendlier with a browsery UA + Accept header
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
+        "Accept": "application/rss+xml, application/xml;q=0.9, */*;q=0.8",
+        "Cache-Control": "no-cache"
+      }
+    });
+
+    if (!r.ok) {
+      const text = await r.text();
+      return {
+        statusCode: r.status,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+        body: JSON.stringify({ status: "error", message: text.slice(0, 500) })
+      };
+    }
 
     const xml = await r.text();
     const articles = parseRss(xml).slice(0, 10);
+
     return {
       statusCode: 200,
       headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
       body: JSON.stringify({ status: "ok", articles })
     };
   } catch (e) {
-    return { statusCode: 500, body: JSON.stringify({ status: "error", message: e.message }) };
+    return {
+      statusCode: 500,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      body: JSON.stringify({ status: "error", message: e.message })
+    };
   }
 }
-
