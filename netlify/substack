@@ -1,9 +1,9 @@
-// Minimal Substack RSS → JSON
+ // netlify/functions/substack.js
+// Minimal Substack RSS -> JSON for The Cerf Report
 function unescapeHtml(s=""){return s.replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&amp;/g,"&");}
 
 function parseRss(xml) {
   const items = [];
-  // super-lightweight parsing for <item> blocks
   const itemRegex = /<item>([\s\S]*?)<\/item>/g;
   let m;
   while ((m = itemRegex.exec(xml))) {
@@ -25,8 +25,11 @@ function parseRss(xml) {
 
 export async function handler(event) {
   try {
-    const feed = event.queryStringParameters?.feed || "https://cerfreport.substack.com/feed";
-    const r = await fetch(feed, { headers: { "User-Agent": "cerfreport-news/1.0" }});
+    const feed =
+      event.queryStringParameters?.feed ||
+      "https://thecerfreport.substack.com/feed";
+
+    const r = await fetch(feed, { headers: { "User-Agent": "cerfreport-news/1.0" } });
     if (!r.ok) return { statusCode: r.status, body: await r.text() };
 
     const xml = await r.text();
@@ -40,3 +43,4 @@ export async function handler(event) {
     return { statusCode: 500, body: JSON.stringify({ status: "error", message: e.message }) };
   }
 }
+
