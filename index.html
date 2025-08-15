@@ -55,7 +55,6 @@
 
     <div class="card" id="cerf-card">
       <h2>The Cerf Report</h2>
-      <!-- 🔗 Link directly under the column title -->
       <div class="section-link">
         <a href="https://thecerfreport.substack.com/" target="_blank" rel="noopener noreferrer">
           thecerfreport.substack.com →
@@ -68,92 +67,100 @@
   <div class="footer" id="updatedAt"></div>
 
   <script>
-    // Sections for the curated NewsAPI proxy
+    // Endpoints
+    const NEWS_FN = '/.netlify/functions/news';
+    const SUBSTACK_FN = '/.netlify/functions/substack?feed=https://thecerfreport.substack.com/feed';
+
+    // Sections to render
     const sections = [
       { id: "front-card",   section: "frontpage" },
       { id: "tech-card",    section: "tech" },
       { id: "world-card",   section: "world" },
-      { id: "finance-card", section: "finance" },
+      { id: "finance-card", section: "finance" }
     ];
 
     function $(sel, root=document){ return root.querySelector(sel); }
 
+    function showStatus(el, msg){
+      el.innerHTML = '<div class="loading">'+ msg +'</div>';
+    }
+
     function render(listEl, articles) {
       listEl.innerHTML = "";
-      if (!articles || articles.length === 0) {
-        listEl.innerHTML = '<div class="loading">Could not load news at this time.</div>';
+      if (!articles || !articles.length) {
+        showStatus(listEl, 'Could not load news at this time.');
         return;
       }
       for (const a of articles) {
         if (!a || a.title === "[Removed]") continue;
         const div = document.createElement("div");
         div.className = "item";
-        div.innerHTML = `
-          <a href="${a.url}" target="_blank" rel="noopener noreferrer">${a.title}</a>
-          <p>${a.description ? a.description : ""}</p>
-        `;
+        div.innerHTML =
+          '<a href="'+ a.url +'" target="_blank" rel="noopener noreferrer">'+ a.title +'</a>' +
+          '<p>' + (a.description ? a.description : '') + '</p>';
         listEl.appendChild(div);
       }
     }
 
     async function fetchNews(section) {
-      const url = `/.netlify/functions/news?section=${encodeURIComponent(section)}`;
-      const r = await fetch(url);
-      if (!r.ok) throw new Error(\`News \${section} HTTP \${r.status}\`);
-      const data = await r.json();
-      return data.articles || [];
-    }
-
-    // Pull The Cerf Report (explicit feed + clear error)
-    async function fetchCerf() {
-      const url = '/.netlify/functions/substack?feed=https://thecerfreport.substack.com/feed';
+      const url = NEWS_FN + '?section=' + encodeURIComponent(section);
+      const listEl = $('#'+ sections.find(s=>s.section===section).id +' .list');
       try {
         const r = await fetch(url);
-        const data = await r.json();
+        const data = await r.json().catch(()=> ({}));
+        console.log('NEWS', section, r.status, data?.status || 'ok', data);
+        if (!r.ok) throw new Error('HTTP '+r.status);
+        return data.articles || [];
+      } catch (e) {
+        console.error('NEWS error', section, e);
+        showStatus(listEl, 'Error: ' + (e.message || e));
+        return [];
+      }
+    }
+
+    async function fetchCerf() {
+      const box = $('#cerf-card .list');
+      try {
+        const r = await fetch(SUBSTACK_FN);
+        const data = await r.json().catch(()=> ({}));
+        console.log('CERF', r.status, data);
         if (!r.ok || data.status !== 'ok' || !Array.isArray(data.articles)) {
-          throw new Error(data.message || `Bad response`);
+          throw new Error((data && data.message) ? data.message : ('HTTP '+r.status));
         }
         return data.articles.map(a => ({
-          title: a.title || '(no title)',
-          url: a.url,
-          description: a.description || ''
+          title: a.title || '(no title)', url: a.url, description: a.description || ''
         }));
       } catch (e) {
-        const box = document.querySelector('#cerf-card .list');
-        if (box) {
-          box.innerHTML = `
-            <div class="loading">
-              Substack error: ${String(e.message || e).slice(0,140)}.
-              <br/><a href="https://thecerfreport.substack.com/" target="_blank" rel="noopener noreferrer">
-                Open The Cerf Report →
-              </a>
-            </div>`;
-        }
+        console.error('CERF error', e);
+        showStatus(box,
+          'Substack error: ' + String(e.message || e).slice(0,140) +
+          ' — <a href="https://thecerfreport.substack.com/" target="_blank" rel="noopener noreferrer">open directly</a>');
         return [];
       }
     }
 
     async function updateAll() {
-      // Loading spinners
-      for (const s of sections) { $(`#${s.id} .list`).innerHTML = '<div class="loading">Loading…</div>'; }
-      $("#cerf-card .list").innerHTML = '<div class="loading">Loading…</div>';
+      // Loading states
+      for (const s of sections) { showStatus($('#'+s.id+' .list'), 'Loading…'); }
+      showStatus($('#cerf-card .list'), 'Loading…');
 
-      // Fetch in parallel
-      const newsPromises = sections.map(s => fetchNews(s.section).catch(() => []));
-      const cerfPromise = fetchCerf().catch(() => []);
+      // Fetch in parallel with per-section error surfacing
+      const promises = [
+        ...sections.map(s => fetchNews(s.section)),
+        fetchCerf()
+      ];
+      const results = await Promise.all(promises);
 
-      const results = await Promise.all([...newsPromises, cerfPromise]);
-      sections.forEach((s, i) => render($(`#${s.id} .list`), results[i]));
-      render($("#cerf-card .list"), results[results.length - 1]);
+      sections.forEach((s, i) => render($('#'+s.id+' .list'), results[i]));
+      render($('#cerf-card .list'), results[results.length - 1]);
 
-      $("#updatedAt").textContent = "Updated " + new Date().toLocaleString();
+      $('#updatedAt').textContent = 'Updated ' + new Date().toLocaleString();
     }
 
-    document.addEventListener("DOMContentLoaded", () => {
+    document.addEventListener('DOMContentLoaded', () => {
       updateAll();
       setInterval(updateAll, 5 * 60 * 1000);
     });
   </script>
 </body>
 </html>
-
