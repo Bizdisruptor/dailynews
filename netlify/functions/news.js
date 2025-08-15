@@ -1,262 +1,209 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>The Cerf Report — Curated News</title>
-  <style>
-    :root { --blue:#0056b3; --ink:#1c1e21; --muted:#606770; --paper:#fff; --bg:#f0f2f5; --positive: #28a745; --negative: #dc3545; }
-    * { box-sizing:border-box }
-    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink);margin:0;padding:20px}
-    h1{text-align:center;color:var(--blue);margin:0 0 8px}
-    .subhead{text-align:center;color:var(--muted);margin:0 0 22px;font-size:.95rem}
-    
-    .market-ticker {
-        background: var(--paper);
-        border-radius: 12px;
-        padding: 15px;
-        margin-bottom: 20px;
-        box-shadow: 0 2px 6px rgba(0,0,0,.08);
-    }
-    .market-indices {
-        display: flex;
-        justify-content: space-around;
-        flex-wrap: wrap;
-        gap: 20px;
-        padding-bottom: 15px;
-        border-bottom: 1px solid #eee;
-        margin-bottom: 15px;
-    }
-    .index-quote { text-align: center; }
-    .index-quote .name { font-weight: 600; font-size: 1rem; color: var(--ink); }
-    .index-quote .price { font-size: 1.1rem; font-weight: 500; margin: 2px 0; }
-    .index-quote .change { font-size: 0.9rem; }
-    .market-movers {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-        gap: 20px;
-    }
-    .mover-category h3 {
-        margin: 0 0 8px;
-        font-size: 0.9rem;
-        color: var(--blue);
-        text-transform: uppercase;
-    }
-    .mover-list { font-size: 0.85rem; }
-    .mover-list div { display: flex; justify-content: space-between; padding: 2px 0; }
-    .mover-list .ticker { font-weight: 600; }
-    .positive { color: var(--positive); }
-    .negative { color: var(--negative); }
+// netlify/functions/news.js  (CommonJS)
+// Robust news with provider round-robin + stale cache fallback.
 
-    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:20px}
-    .card{background:var(--paper);border-radius:12px;box-shadow:0 2px 6px rgba(0,0,0,.08);padding:18px;overflow:hidden}
-    .card h2{margin:0 0 6px;border-bottom:2px solid var(--blue);padding-bottom:8px;font-size:1.15rem}
-    .section-link{margin:-2px 0 10px}
-    .section-link a{font-size:.92rem;text-decoration:none}
-    .section-link a:hover{text-decoration:underline}
-    .list{max-height:520px;overflow-y:auto;padding-right:10px; min-height: 100px;}
-    .item{margin:0 0 14px;border-bottom:1px solid #eee;padding:0 0 12px}
-    .item:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0}
-    .item a{color:#0d6efd;text-decoration:none;font-weight:600}
-    .item a:hover{text-decoration:underline}
-    .item p{margin:6px 0 0;color:var(--muted);font-size:.92rem;line-height:1.35}
-    .loading{text-align:center;padding:16px;color:var(--muted);line-height:1.4;}
-    .footer{margin-top:18px;text-align:center;color:#8a8f98;font-size:.85rem}
-  </style>
-</head>
-<body>
-  <h1>The Cerf Report — Curated News</h1>
-  <div class="subhead">News minus the junk. Tech, finance, and interesting stuff.</div>
+const HEADERS = {
+  "Content-Type": "application/json",
+  "Access-Control-Allow-Origin": "*",
+};
 
-  <div class="market-ticker" id="market-ticker">
-    <div class="loading">Loading Market Data…</div>
-  </div>
+// --- Provider config ---------------------------------------------------------
 
-  <div class="grid">
-    <div class="card" id="front-card">
-      <h2>Front Page</h2>
-      <div class="list"><div class="loading">Loading…</div></div>
-    </div>
-    <div class="card" id="tech-card">
-      <h2>Technology</h2>
-      <div class="list"><div class="loading">Loading…</div></div>
-    </div>
-    <div class="card" id="world-card">
-      <h2>World News</h2>
-      <div class="list"><div class="loading">Loading…</div></div>
-    </div>
-    <div class="card" id="finance-card">
-      <h2>Finance</h2>
-      <div class="list"><div class="loading">Loading…</div></div>
-    </div>
-    <div class="card" id="cerf-card">
-      <h2>The Cerf Report</h2>
-      <div class="section-link">
-        <a href="https://thecerfreport.substack.com/" target="_blank" rel="noopener noreferrer">
-          thecerfreport.substack.com →
-        </a>
-      </div>
-      <div class="list"><div class="loading">Loading…</div></div>
-    </div>
-  </div>
+// 1) Paid/Keyed (optional)  — only used if a key is present
+const HAS_NEWSAPI = !!process.env.NEWSAPI_KEY;
 
-  <div class="footer" id="updatedAt"></div>
+// 2) RSS fallbacks (no key). We'll round-robin inside each list.
+const RSS = {
+  frontpage: [
+    "https://feeds.reuters.com/reuters/topNews",
+    "https://feeds.bbci.co.uk/news/rss.xml",
+    "https://www.npr.org/rss/rss.php?id=1001", // NPR Top Stories
+  ],
+  world: [
+    "https://feeds.reuters.com/reuters/worldNews",
+    "https://feeds.bbci.co.uk/news/world/rss.xml",
+    "https://www.npr.org/rss/rss.php?id=1004", // NPR World
+  ],
+  tech: [
+    "https://techcrunch.com/feed/",
+    "https://www.theverge.com/rss/index.xml",
+    "https://feeds.arstechnica.com/arstechnica/index",
+  ],
+  finance: [
+    "https://feeds.content.dowjones.io/public/rss/mw_topstories", // MarketWatch
+    "https://www.cnbc.com/id/100003114/device/rss/rss.html",      // CNBC Top News
+    "https://finance.yahoo.com/news/rssindex",                    // Yahoo Finance news
+  ],
+};
 
-  <script>
-    const sections = [
-      { id: "front-card",   section: "frontpage" },
-      { id: "tech-card",    section: "tech" },
-      { id: "world-card",   section: "world" },
-      { id: "finance-card", section: "finance" },
-    ];
+// Map UI "section" => NewsAPI category
+const NEWSAPI_CAT = {
+  frontpage: "general",
+  world: "general",
+  tech: "technology",
+  finance: "business",
+};
 
-    const $ = (sel, root = document) => root.querySelector(sel);
+// --- Utilities ---------------------------------------------------------------
 
-    function render(listEl, articles) {
-      // ✅ FIX: Only update the list if the fetch was successful and returned articles.
-      // If 'articles' is null or empty, this function will now do nothing, preserving old content.
-      if (articles && articles.length > 0) {
-        listEl.innerHTML = ""; // Clear old content
-        for (const a of articles) {
-          if (!a || !a.title) continue;
-          const div = document.createElement("div");
-          div.className = "item";
-          div.innerHTML = `
-            <a href="${a.url}" target="_blank" rel="noopener noreferrer">${a.title}</a>
-            <p>${a.description ? a.description : ""}</p>
-          `;
-          listEl.appendChild(div);
-        }
-      } else {
-        // If the list is currently showing "Loading...", but the fetch failed,
-        // show the "Could not load" message. Otherwise, leave old content.
-        if (listEl.innerHTML.includes('loading')) {
-            listEl.innerHTML = '<div class="loading">Could not load news at this time.</div>';
-        }
+const SECTIONS = ["frontpage", "world", "tech", "finance"];
+
+// In-memory state survives warm Lambda invocations.
+const RR = Object.fromEntries(SECTIONS.map(s => [s, 0])); // round-robin index
+const CACHE = Object.fromEntries(SECTIONS.map(s => [s, { ts: 0, articles: [] }]));
+const CACHE_FILE = "/tmp/news-cache.json";
+
+async function readDiskCache() {
+  try {
+    const fs = require("fs");
+    if (fs.existsSync(CACHE_FILE)) {
+      const raw = fs.readFileSync(CACHE_FILE, "utf8");
+      const json = JSON.parse(raw);
+      for (const s of SECTIONS) {
+        if (json[s]) CACHE[s] = json[s];
       }
     }
+  } catch (_) {}
+}
+async function writeDiskCache() {
+  try {
+    const fs = require("fs");
+    fs.writeFileSync(CACHE_FILE, JSON.stringify(CACHE));
+  } catch (_) {}
+}
 
-    async function fetchMarketData() {
-        const url = '/.netlify/functions/market-data';
-        try {
-            const r = await fetch(url);
-            if (!r.ok) throw new Error(`Market data fetch failed: ${r.status}`);
-            const response = await r.json();
-            if (response.status !== 'ok') throw new Error(response.message);
-            return response.data;
-        } catch (e) {
-            console.error("Failed to fetch market data:", e);
-            return null;
-        }
-    }
-
-    function renderMarketData(data) {
-        const container = $('#market-ticker');
-        if (!data) {
-            container.innerHTML = '<div class="loading">Could not load market data.</div>';
-            return;
-        }
-
-        const formatChange = (change, percentChange) => {
-            const value = change ? change.toFixed(2) : '0.00';
-            const percent = percentChange ? percentChange.toFixed(2) : '0.00';
-            const sign = change >= 0 ? '+' : '';
-            const className = change >= 0 ? 'positive' : 'negative';
-            return `<span class="${className}">${sign}${value} (${sign}${percent}%)</span>`;
-        };
-        
-        const indicesHtml = data.indices.map(idx => `
-            <div class="index-quote">
-                <div class="name">${idx.name}</div>
-                <div class="price">${idx.c ? idx.c.toFixed(2) : 'N/A'}</div>
-                <div class="change">${formatChange(idx.d, idx.dp)}</div>
-            </div>
-        `).join('');
-
-        const moversHtml = Object.entries(data.movers).map(([category, stocks]) => `
-            <div class="mover-category">
-                <h3>${category}</h3>
-                <div class="mover-list">
-                    ${stocks.map(stock => `
-                        <div>
-                            <span class="ticker">${stock.ticker}</span>
-                            <span class="change">${formatChange(stock.d, stock.dp)}</span>
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
-        `).join('');
-
-        container.innerHTML = `
-            <div class="market-indices">${indicesHtml}</div>
-            <div class="market-movers">${moversHtml}</div>
-        `;
-    }
-
-    async function fetchNews(section) {
-      const url = `/.netlify/functions/news?section=${encodeURIComponent(section)}`;
-      try {
-        const r = await fetch(url);
-        if (!r.ok) throw new Error(`News ${section} HTTP ${r.status}`);
-        const data = await r.json();
-        // Return null if status is not 'ok' or no articles, so render() knows to keep old content.
-        if (data.status !== 'ok' || !data.articles || data.articles.length === 0) return null;
-        return data.articles;
-      } catch {
-        return null; // Return null on any error
-      }
-    }
-
-    async function fetchCerf() {
-      const url = '/.netlify/functions/substack?mode=archive';
-      try {
-        const r = await fetch(url);
-        if (!r.ok) throw new Error('Substack fetch failed');
-        const data = await r.json().catch(() => ({}));
-        if (data.status !== 'ok' || !Array.isArray(data.articles)) {
-          throw new Error('Invalid Substack data');
-        }
-        return (data.articles || []).map(a => ({
-          title: a.title || "Untitled",
-          url: a.url,
-          description: a.description || ''
-        }));
-      } catch (e) {
-        console.error(e);
-        return null;
-      }
-    }
-
-    async function updateAll() {
-      // ✅ FIX: Don't clear content here. Just fetch and let render() decide.
-      // A small visual indicator that an update is happening.
-      const footer = $("#updatedAt");
-      const originalFooterText = footer.textContent;
-      footer.textContent = "Updating...";
-
-      const results = await Promise.all([
-        ...sections.map(s => fetchNews(s.section)),
-        fetchCerf(),
-      ]);
-
-      sections.forEach((s, i) => render($(`#${s.id} .list`), results[i]));
-      render($("#cerf-card .list"), results[sections.length]);
-
-      // Restore footer text or set new time.
-      footer.textContent = "Updated " + new Date().toLocaleString();
-    }
-
-    document.addEventListener("DOMContentLoaded", async () => {
-      const marketData = await fetchMarketData();
-      renderMarketData(marketData);
-      
-      updateAll();
-      setInterval(updateAll, 5 * 60 * 1000);
+// Simple RSS parsing (title/link/description/pubDate)
+function unescapeHtml(s = "") {
+  return s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+}
+function stripTags(s = "") {
+  return s.replace(/<\/?[^>]+(>|$)/g, "").trim();
+}
+function parseRss(xml) {
+  const out = [];
+  const itemRe = /<item>([\s\S]*?)<\/item>/gi;
+  let m;
+  while ((m = itemRe.exec(xml))) {
+    const chunk = m[1];
+    const pick = (tag) => {
+      const rx = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i");
+      const mm = rx.exec(chunk);
+      return mm ? unescapeHtml(mm[1].trim()) : "";
+    };
+    out.push({
+      title: stripTags(pick("title")),
+      url: pick("link"),
+      description: stripTags(pick("description")),
+      publishedAt: pick("pubDate"),
     });
-  </script>
-</body>
-</html>
+  }
+  return out.filter(a => a.title && a.url);
+}
 
+async function fetchJson(url, headers) {
+  const r = await fetch(url, { headers, redirect: "follow" });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+async function fetchText(url, headers) {
+  const r = await fetch(url, { headers, redirect: "follow" });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.text();
+}
 
+// --- Providers ---------------------------------------------------------------
 
+async function getNewsapi(section) {
+  if (!HAS_NEWSAPI) return null;
+  const cat = NEWSAPI_CAT[section] || "general";
+  const url = `https://newsapi.org/v2/top-headlines?country=us&category=${encodeURIComponent(cat)}&pageSize=10`;
+  const data = await fetchJson(url, { "X-Api-Key": process.env.NEWSAPI_KEY, "Accept": "application/json" });
+  const articles = (data.articles || [])
+    .filter(a => a && a.title && a.title !== "[Removed]")
+    .map(a => ({ title: a.title, url: a.url, description: a.description || "" }));
+  return articles.length ? articles : null;
+}
 
+async function getRssRoundRobin(section) {
+  const feeds = RSS[section] || [];
+  if (!feeds.length) return null;
+  const startIdx = RR[section] % feeds.length;
+
+  // try up to feeds.length feeds, starting from the current RR index
+  for (let i = 0; i < feeds.length; i++) {
+    const idx = (startIdx + i) % feeds.length;
+    const feedUrl = feeds[idx];
+    try {
+      const xml = await fetchText(feedUrl, {
+        "User-Agent": "Mozilla/5.0 (NetlifyFunction)",
+        "Accept": "application/rss+xml, application/xml;q=0.9, */*;q=0.8",
+      });
+      const items = parseRss(xml);
+      if (items && items.length) {
+        RR[section] = idx + 1; // advance RR after success
+        // normalize fields
+        const mapped = items.slice(0, 12).map(a => ({
+          title: a.title,
+          url: a.url,
+          description: a.description || "",
+        }));
+        return mapped;
+      }
+    } catch (_) {
+      // try next feed
+    }
+  }
+  return null;
+}
+
+// --- Main handler ------------------------------------------------------------
+
+exports.handler = async function (event) {
+  try {
+    await readDiskCache();
+
+    const section = (event.queryStringParameters?.section || "frontpage").toLowerCase();
+    if (!SECTIONS.includes(section)) {
+      return { statusCode: 400, headers: HEADERS, body: JSON.stringify({ status: "error", message: "Unknown section" }) };
+    }
+
+    // 1) Try NewsAPI (if available)
+    let articles = null;
+    try { articles = await getNewsapi(section); } catch (_) {}
+
+    // 2) Fallback to RSS (round-robin inside the list)
+    if (!articles || !articles.length) {
+      try { articles = await getRssRoundRobin(section); } catch (_) {}
+    }
+
+    // 3) If still nothing, serve stale cache (never blank the page)
+    if (!articles || !articles.length) {
+      const cached = CACHE[section]?.articles || [];
+      if (cached.length) {
+        return {
+          statusCode: 200,
+          headers: HEADERS,
+          body: JSON.stringify({ status: "ok", articles: cached, stale: true })
+        };
+      }
+      // As a last resort, return an empty ok so the UI shows "Could not load…"
+      return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ status: "ok", articles: [] }) };
+    }
+
+    // 4) Update cache & persist
+    CACHE[section] = { ts: Date.now(), articles };
+    await writeDiskCache();
+
+    return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ status: "ok", articles }) };
+  } catch (e) {
+    // On unexpected errors, still try to serve cache
+    try {
+      await readDiskCache();
+      const section = event.queryStringParameters?.section || "frontpage";
+      const cached = CACHE[section]?.articles || [];
+      if (cached.length) {
+        return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ status: "ok", articles: cached, stale: true }) };
+      }
+    } catch (_) {}
+    return { statusCode: 500, headers: HEADERS, body: JSON.stringify({ status: "error", message: e.message }) };
+  }
+};
