@@ -4,8 +4,9 @@
 const FINNHUB_BASE = "https://finnhub.io/api/v1/quote";
 
 // Define the tickers for indices and categorized stocks
+// Using more reliable ETF symbols for indices.
 const TICKERS = {
-  indices: ['^DJI', '^GSPC', '^IXIC'],
+  indices: ['DIA', 'SPY', 'QQQ'], // DIA for Dow, SPY for S&P 500, QQQ for NASDAQ
   ai: ['NVDA', 'MSFT', 'GOOG', 'AMD'],
   crypto: ['COIN', 'MSTR', 'MARA', 'RIOT'], // Crypto-related stocks
   energy: ['XOM', 'CVX', 'SLB', 'OXY']
@@ -13,9 +14,9 @@ const TICKERS = {
 
 // A simple map for display names
 const DISPLAY_NAMES = {
-    '^DJI': 'Dow Jones',
-    '^GSPC': 'S&P 500',
-    '^IXIC': 'NASDAQ'
+    'DIA': 'Dow Jones',
+    'SPY': 'S&P 500',
+    'QQQ': 'NASDAQ'
 };
 
 // Fetches a single quote from Finnhub
@@ -82,3 +83,4 @@ export async function handler(event) {
     };
   }
 }
+
