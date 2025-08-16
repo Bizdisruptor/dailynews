@@ -1,213 +1,126 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>The Cerf Report — Curated News</title>
-  <style>
-    :root { --blue:#0056b3; --ink:#1c1e21; --muted:#606770; --paper:#fff; --bg:#f0f2f5; --positive:#17823b; --negative:#b00020; }
-    * { box-sizing:border-box; }
-    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink);margin:0;padding:18px}
-    h1{text-align:center;color:var(--blue);margin:0 0 6px}
-    .subhead{text-align:center;color:var(--muted);margin:0 0 18px;font-size:.95rem}
+// netlify/functions/market-data.js
+// Market data with robust fallbacks + dynamic "top movers" per sector.
+import { getStore } from "@netlify/blobs";
 
-    .market {
-      background:var(--paper); border-radius:12px; box-shadow:0 2px 6px rgba(0,0,0,.08);
-      padding:12px 14px; margin:0 auto 18px; max-width:1400px;
+const HEADERS = { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" };
+const CACHE_KEY = "last-market-data";
+
+// ----- Universes (we'll sort by biggest absolute % movers) -----
+const AI_UNIVERSE = ["NVDA", "MSFT", "GOOG", "AMD", "AVGO", "META", "AAPL", "TSLA", "SMCI", "ASML", "MU", "TSM"];
+const CRYPTO_UNIVERSE = ["COIN", "MSTR", "MARA", "RIOT", "CLSK", "HUT", "BITF", "IREN", "CIFR", "WULF"];
+const ENERGY_UNIVERSE = ["XOM", "CVX", "SLB", "OXY", "COP", "DVN", "EOG", "PXD", "HAL", "MRO", "APA"];
+
+// Index and Macro symbols for Yahoo Finance
+const YAHOO_SYMBOLS = {
+  indices: [
+    { sym: "^DJI", name: "Dow Jones" },
+    { sym: "^GSPC", name: "S&P 500" },
+    { sym: "^IXIC", name: "NASDAQ" },
+  ],
+  macro: [
+    { sym: "BTC-USD", name: "Bitcoin" },
+    { sym: "GC=F", name: "Gold" },
+    { sym: "^TNX", name: "US 10Y" },
+  ]
+};
+
+// ---------- Utils ----------
+function isNum(v) { return typeof v === "number" && Number.isFinite(v); }
+
+// ---------- Provider: Yahoo Finance ----------
+async function yahooQuotes(symbols) {
+  const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbols.join(","))}`;
+  const r = await fetch(url, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36",
+      "Accept": "application/json",
     }
-    .market .row { display:flex; flex-wrap:wrap; gap:16px 24px; align-items:center; }
-    .chip { display:flex; gap:6px; align-items:center; font-size:.92rem; }
-    .chip a { color:inherit; text-decoration:none; font-weight:600; }
-    .chip a:hover { text-decoration:underline; color:var(--blue); }
-    .price { font-weight:600; }
-    .chg.positive{ color:var(--positive); }
-    .chg.negative{ color:var(--negative); }
-    .divider { height:10px }
+  });
+  if (!r.ok) throw new Error(`Yahoo HTTP ${r.status}`);
+  const raw = await r.json();
+  const arr = raw?.quoteResponse?.result || [];
+  return arr.map(q => ({
+    ticker: q.symbol,
+    name: q.shortName || q.longName || q.symbol,
+    c: q.regularMarketPrice ?? null,
+    d: q.regularMarketChange ?? null,
+    dp: q.regularMarketChangePercent ?? null,
+  }));
+}
 
-    .mover-grid { display:grid; gap:10px 14px; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); margin-top:8px; }
-    .mgroup h3 { margin:0 0 6px; font-size:.8rem; color:var(--blue); letter-spacing:.5px; text-transform:uppercase; }
-    .mlist div { display:flex; justify-content:space-between; font-size:.88rem; padding:1px 0; }
-    .mlist a { font-weight:600; color:inherit; text-decoration:none; }
-    .mlist a:hover { text-decoration:underline; color:var(--blue); }
+// ---------- Build Data Structure ----------
+function mapBy(arr, key = "ticker") {
+  const m = new Map();
+  (arr || []).forEach(x => m.set(x[key], x));
+  return m;
+}
 
-    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:18px; max-width:1400px; margin:0 auto}
-    .card{background:var(--paper);border-radius:12px;box-shadow:0 2px 6px rgba(0,0,0,.08);padding:16px;overflow:hidden}
-    .card h2{margin:0 0 8px;border-bottom:2px solid var(--blue);padding-bottom:8px;font-size:1.1rem}
-    .section-link{margin:-4px 0 8px}
-    .section-link a{font-size:.9rem;text-decoration:none}
-    .section-link a:hover{text-decoration:underline}
-    .list{max-height:520px;overflow-y:auto;padding-right:8px;min-height:100px}
-    .item{margin:0 0 12px;border-bottom:1px solid #eee;padding:0 0 10px}
-    .item:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0}
-    .item a{color:#0d6efd;text-decoration:none;font-weight:600}
-    .item a:hover{text-decoration:underline}
-    .item p{margin:6px 0 0;color:var(--muted);font-size:.92rem;line-height:1.35}
-    .loading{text-align:center;padding:14px;color:var(--muted);line-height:1.4;}
-    .footer{margin:16px auto 0;text-align:center;color:#8a8f98;font-size:.85rem;max-width:1400px}
-  </style>
-</head>
-<body>
-  <h1>The Cerf Report — Curated News</h1>
-  <div class="subhead">News minus the junk. Tech, finance, and interesting stuff.</div>
-
-  <div class="market" id="market"><div class="loading">Loading market data…</div></div>
-
-  <div class="grid">
-    <div class="card" id="front-card">
-      <h2>Front Page</h2>
-      <div class="list"><div class="loading">Loading…</div></div>
-    </div>
-    <div class="card" id="tech-card">
-      <h2>Technology</h2>
-      <div class="list"><div class="loading">Loading…</div></div>
-    </div>
-    <div class="card" id="world-card">
-      <h2>World News</h2>
-      <div class="list"><div class="loading">Loading…</div></div>
-    </div>
-    <div class="card" id="finance-card">
-      <h2>Finance</h2>
-      <div class="list"><div class="loading">Loading…</div></div>
-    </div>
-    <div class="card" id="cerf-card">
-      <h2>The Cerf Report</h2>
-      <div class="section-link">
-        <a href="https://thecerfreport.substack.com/" target="_blank" rel="noopener noreferrer">
-          thecerfreport.substack.com →
-        </a>
-      </div>
-      <div class="list"><div class="loading">Loading…</div></div>
-    </div>
-  </div>
-
-  <div class="footer" id="updatedAt"></div>
-
-  <script>
-    const ABS = (path) => new URL(path, location.origin).toString(); // absolute URLs avoid path issues
-    const FINANCE = (t) => `https://finance.yahoo.com/quote/${encodeURIComponent(t)}`;
-    const $ = (sel, root=document) => root.querySelector(sel);
-
-    const sections = [
-      { id: "front-card",   section: "frontpage" },
-      { id: "tech-card",    section: "tech" },
-      { id: "world-card",   section: "world" },
-      { id: "finance-card", section: "finance" },
-    ];
-
-    function fmt(n, d=2){ if(n==null || isNaN(n)) return "—"; return (+n).toFixed(d); }
-    function chipHTML(q){
-      const sign = (q.d ?? 0) >= 0 ? "+" : "";
-      const cls  = (q.d ?? 0) >= 0 ? "positive" : "negative";
-      return `<span class="chip">
-        <a href="${FINANCE(q.ticker)}" target="_blank" rel="noopener">${q.name}</a>
-        <span class="price">${fmt(q.c)}</span>
-        <span class="chg ${cls}">${sign}${fmt(q.d)} (${sign}${fmt(q.dp)}%)</span>
-      </span>`;
+function topMovers(tickers, quoteMap, count = 8) {
+  const rows = [];
+  for (const t of tickers) {
+    const q = quoteMap.get(t);
+    if (q && isNum(q.dp)) {
+      rows.push({ ticker: t, c: q.c, d: q.d, dp: q.dp });
     }
-    function listHTML(arr){
-      return (arr||[]).map(q=>{
-        const sign=(q.d??0)>=0?"+":""; const cls=(q.d??0)>=0?"positive":"negative";
-        return `<div>
-          <a href="${FINANCE(q.ticker)}" target="_blank" rel="noopener">${q.ticker}</a>
-          <span class="${cls}">${sign}${fmt(q.d)} (${sign}${fmt(q.dp)}%)</span>
-        </div>`;
-      }).join('');
-    }
+  }
+  rows.sort((a, b) => Math.abs(b.dp) - Math.abs(a.dp));
+  return rows.slice(0, count);
+}
 
-    function renderMarket(data){
-      const m = $('#market');
-      if(!data){ m.innerHTML = '<div class="loading">Could not load market data.</div>'; return; }
-      const macro   = (data.macro||[]).map(chipHTML).join(' • ');
-      const indices = (data.indices||[]).map(chipHTML).join(' • ');
-      const ai      = listHTML(data.ai);
-      const crypto  = listHTML(data.crypto);
-      const energy  = listHTML(data.energy);
-      m.innerHTML = `
-        <div class="row">${macro}</div>
-        <div class="divider"></div>
-        <div class="row">${indices}</div>
-        <div class="mover-grid">
-          <div class="mgroup"><h3>AI</h3><div class="mlist">${ai}</div></div>
-          <div class="mgroup"><h3>CRYPTO</h3><div class="mlist">${crypto}</div></div>
-          <div class="mgroup"><h3>ENERGY</h3><div class="mlist">${energy}</div></div>
-        </div>`;
-    }
+async function getData() {
+  const allYahooSyms = [
+    ...YAHOO_SYMBOLS.indices.map(i => i.sym),
+    ...YAHOO_SYMBOLS.macro.map(m => m.sym),
+    ...AI_UNIVERSE, ...CRYPTO_UNIVERSE, ...ENERGY_UNIVERSE,
+  ];
 
-    function renderNewsList(listEl, articles){
-      if(!articles || !articles.length){
-        listEl.innerHTML = '<div class="loading">Could not load news at this time.</div>';
-        return;
+  const quotes = await yahooQuotes(allYahooSyms);
+  const quoteMap = mapBy(quotes);
+
+  const getQuoteData = (config) => {
+      const quote = quoteMap.get(config.sym);
+      if (!quote) return null;
+      // Special handling for US 10Y Treasury Yield
+      if (config.sym === "^TNX") {
+          return { name: config.name, ticker: "US10Y", c: quote.c, d: quote.d, dp: quote.dp };
       }
-      listEl.innerHTML = "";
-      for(const a of articles){
-        if(!a || !a.title) continue;
-        const div = document.createElement("div");
-        div.className = "item";
-        div.innerHTML = `<a href="${a.url}" target="_blank" rel="noopener noreferrer">${a.title}</a>
-                         <p>${a.description ? a.description : ""}</p>`;
-        listEl.appendChild(div);
-      }
-    }
+      return { name: config.name, ticker: quote.ticker, c: quote.c, d: quote.d, dp: quote.dp };
+  };
 
-    async function fetchJSON(url){
-      try{
-        const r = await fetch(url, { redirect: "follow" });
-        if(!r.ok) throw new Error(`HTTP ${r.status}`);
-        return await r.json();
-      }catch(e){
-        console.error("Fetch failed:", url, e);
-        throw e;
-      }
-    }
+  const indices = YAHOO_SYMBOLS.indices.map(getQuoteData).filter(Boolean);
+  const macro = YAHOO_SYMBOLS.macro.map(getQuoteData).filter(Boolean);
 
-    async function fetchMarket(){
-      const data = await fetchJSON(ABS("/.netlify/functions/market-data"));
-      if(data.status !== "ok" || !data.data) throw new Error("Bad market payload");
-      return data.data;
-    }
-    async function fetchNews(section){
-      const data = await fetchJSON(ABS(`/.netlify/functions/news?section=${encodeURIComponent(section)}`));
-      if(data.status !== "ok") return [];
-      return data.articles || [];
-    }
-    async function fetchCerf(){
-      const data = await fetchJSON(ABS("/.netlify/functions/substack?mode=archive"));
-      if(data.status !== "ok" || !Array.isArray(data.articles)) return [];
-      return data.articles.map(a=>({ title:a.title||"Untitled", url:a.url, description:a.description||"" }));
-    }
+  const movers = {
+    ai: topMovers(AI_UNIVERSE, quoteMap, 8),
+    crypto: topMovers(CRYPTO_UNIVERSE, quoteMap, 8),
+    energy: topMovers(ENERGY_UNIVERSE, quoteMap, 8),
+  };
 
-    async function updateAll(){
-      // Market
-      try{
-        const market = await fetchMarket();
-        renderMarket(market);
-      }catch(e){
-        console.error("Market error:", e);
-        renderMarket(null);
-      }
+  return { indices, macro, ...movers };
+}
 
-      // News
-      try{
-        const results = await Promise.all([
-          ...sections.map(s => fetchNews(s.section).catch(err => (console.error(s.section, err), []))),
-          fetchCerf().catch(err => (console.error("substack", err), []))
-        ]);
-        sections.forEach((s, i) => renderNewsList($(`#${s.id} .list`), results[i]));
-        renderNewsList($("#cerf-card .list"), results[results.length-1]);
-      }catch(e){
-        console.error("News update error:", e);
-        // Ensure we clear "Loading…" even on fatal errors
-        sections.forEach(s => renderNewsList($(`#${s.id} .list`), []));
-        renderNewsList($("#cerf-card .list"), []);
-      }
+// ---------- Handler with Caching ----------
+export async function handler() {
+  const cache = getStore('market-data-cache');
+  try {
+    const data = await getData();
+    const hasSomething = data.indices.length || data.macro.length || data.ai.length;
 
-      $("#updatedAt").textContent = "Updated " + new Date().toLocaleString();
+    if (hasSomething) {
+      const payload = { status: "ok", data, ts: Date.now() };
+      await cache.set(CACHE_KEY, payload);
+      return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ status: "ok", data, source: "live" }) };
     }
-
-    document.addEventListener("DOMContentLoaded", () => {
-      updateAll();
-      setInterval(updateAll, 5 * 60 * 1000);
-    });
-  </script>
-</body>
-</html>
+    // If live data is empty, fall through to cache
+    throw new Error("Live data was empty.");
+  } catch (e) {
+    console.warn(`Live market data fetch failed: ${e.message}. Attempting to serve from cache.`);
+    const cached = await cache.get(CACHE_KEY, { type: 'json' });
+    if (cached && cached.status === "ok") {
+      console.log("Serving stale market data from cache.");
+      return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ status: "ok", data: cached.data, source: "cache" }) };
+    }
+    console.error("Cache is empty. No market data to serve.");
+    return { statusCode: 500, headers: HEADERS, body: JSON.stringify({ status: "error", message: "Market data is currently unavailable." }) };
+  }
+}
