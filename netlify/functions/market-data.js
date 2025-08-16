@@ -1,234 +1,213 @@
-// CommonJS Netlify function
-// Market data with robust fallbacks + dynamic "top movers" per sector.
-// Order: Yahoo -> Stooq (CSV) -> last-good cache in /tmp.
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>The Cerf Report — Curated News</title>
+  <style>
+    :root { --blue:#0056b3; --ink:#1c1e21; --muted:#606770; --paper:#fff; --bg:#f0f2f5; --positive:#17823b; --negative:#b00020; }
+    * { box-sizing:border-box; }
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink);margin:0;padding:18px}
+    h1{text-align:center;color:var(--blue);margin:0 0 6px}
+    .subhead{text-align:center;color:var(--muted);margin:0 0 18px;font-size:.95rem}
 
-const fs = require("fs");
-
-const HEADERS = { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" };
-const CACHE_FILE = "/tmp/market-cache.json";
-
-// ----- Universes (we'll sort by biggest absolute % movers) -----
-const AI_UNIVERSE = [
-  "NVDA","MSFT","GOOG","AMD","AVGO","META","AAPL","TSLA","SMCI","ASML","MU","TSM"
-];
-const CRYPTO_UNIVERSE = [
-  "COIN","MSTR","MARA","RIOT","CLSK","HUT","BITF","IREN","CIFR","WULF"
-];
-const ENERGY_UNIVERSE = [
-  "XOM","CVX","SLB","OXY","COP","DVN","EOG","PXD","HAL","MRO","APA"
-];
-
-// Index symbols
-const YAHOO_INDICES = [
-  { sym: "^DJI",  name: "Dow Jones" },
-  { sym: "^GSPC", name: "S&P 500"   },
-  { sym: "^IXIC", name: "NASDAQ"    },
-];
-const ETF_FALLBACK = { "^DJI":"DIA", "^GSPC":"SPY", "^IXIC":"QQQ" }; // for Stooq
-
-// ---------- Utils ----------
-function isNum(v){ return typeof v === "number" && Number.isFinite(v); }
-function num(x){ const n = +x; return Number.isFinite(n) ? n : null; }
-
-function readCache() {
-  try { if (fs.existsSync(CACHE_FILE)) return JSON.parse(fs.readFileSync(CACHE_FILE,"utf8")); } catch(_) {}
-  return null;
-}
-function writeCache(obj) {
-  try { fs.writeFileSync(CACHE_FILE, JSON.stringify(obj)); } catch(_) {}
-}
-
-// ---------- Providers ----------
-async function yahooQuotes(symbols) {
-  const url = "https://query1.finance.yahoo.com/v7/finance/quote?symbols=" + encodeURIComponent(symbols.join(","));
-  const r = await fetch(url, {
-    headers: {
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36",
-      "Accept": "application/json",
-      "Referer": "https://finance.yahoo.com/"
-    },
-    redirect: "follow"
-  });
-  if (!r.ok) throw new Error("Yahoo HTTP " + r.status);
-  const raw = await r.json();
-  const arr = raw?.quoteResponse?.result || [];
-  return arr.map(q => ({
-    ticker: q.symbol,
-    name: q.shortName || q.longName || q.symbol,
-    c: q.regularMarketPrice ?? null,
-    d: q.regularMarketChange ?? null,
-    dp: q.regularMarketChangePercent ?? null,
-    currency: q.currency || q.financialCurrency || "",
-    exchange: q.fullExchangeName || q.exchange || ""
-  }));
-}
-
-// Stooq CSV fallback (.us suffix)
-async function stooqQuotes(symbols) {
-  if (!symbols.length) return [];
-  const stooqSyms = symbols.map(s => s.toLowerCase() + ".us");
-  const url = "https://stooq.com/q/l/?s=" + encodeURIComponent(stooqSyms.join(",")) + "&f=sd2t2ohlcv&h&e=csv";
-  const r = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0", "Accept":"text/csv" }});
-  if (!r.ok) throw new Error("Stooq HTTP " + r.status);
-  const text = await r.text();
-
-  const [header, ...lines] = text.trim().split("\n");
-  const cols = header.split(",").map(s => s.trim().toLowerCase());
-  const idx = k => cols.indexOf(k);
-
-  const out = [];
-  for (const line of lines) {
-    const p = line.split(",").map(s => s.trim());
-    const sym = (p[idx("symbol")] || "").replace(".US","").toUpperCase();
-    const close = num(p[idx("close")]);
-    const open  = num(p[idx("open")]);
-    const d  = (isNum(close) && isNum(open)) ? close - open : null;
-    const dp = (isNum(d) && isNum(open) && open !== 0) ? (d/open)*100 : null;
-    out.push({ ticker: sym, name: sym, c: close, d, dp, currency:"", exchange:"Stooq" });
-  }
-  return out;
-}
-
-// BTC (CoinGecko) with 24h change
-async function getBTC() {
-  try {
-    const url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_change=true";
-    const r = await fetch(url, { headers: { "Accept":"application/json","User-Agent":"Mozilla/5.0" }});
-    if (!r.ok) throw new Error("CG " + r.status);
-    const j = await r.json();
-    const px = j?.bitcoin?.usd;
-    const ch = j?.bitcoin?.usd_24h_change;
-    if (!isNum(px)) throw new Error("no btc");
-    const dp = isNum(ch) ? ch : null;
-    const d = isNum(dp) ? (px * dp / 100) : null;
-    return { ticker:"BTCUSD", name:"Bitcoin", c:px, d, dp };
-  } catch(_) { return null; }
-}
-
-// Gold (XAU->USD). (We only show price; change often not reliable intraday here.)
-async function getGold() {
-  try {
-    const r = await fetch("https://api.exchangerate.host/latest?base=XAU&symbols=USD",
-      { headers: { "Accept":"application/json","User-Agent":"Mozilla/5.0" }});
-    if (!r.ok) throw new Error("XAU " + r.status);
-    const j = await r.json();
-    const px = j?.rates?.USD;
-    if (!isNum(px)) throw new Error("no gold");
-    return { ticker:"XAUUSD", name:"Gold (XAU)", c:px, d:null, dp:null };
-  } catch(_) { return null; }
-}
-
-// ---------- Build data ----------
-function mapBy(arr, key="ticker") {
-  const m = new Map();
-  (arr || []).forEach(x => m.set(x[key], x));
-  return m;
-}
-
-function topMovers(tickers, quoteMap, count=8) {
-  const rows = [];
-  for (const t of tickers) {
-    const q = quoteMap.get(t);
-    if (q && isNum(q.dp)) {
-      rows.push({ ticker:t, c:q.c, d:q.d, dp:q.dp });
+    .market {
+      background:var(--paper); border-radius:12px; box-shadow:0 2px 6px rgba(0,0,0,.08);
+      padding:12px 14px; margin:0 auto 18px; max-width:1400px;
     }
-  }
-  rows.sort((a,b) => Math.abs(b.dp) - Math.abs(a.dp));
-  return rows.slice(0, count);
-}
+    .market .row { display:flex; flex-wrap:wrap; gap:16px 24px; align-items:center; }
+    .chip { display:flex; gap:6px; align-items:center; font-size:.92rem; }
+    .chip a { color:inherit; text-decoration:none; font-weight:600; }
+    .chip a:hover { text-decoration:underline; color:var(--blue); }
+    .price { font-weight:600; }
+    .chg.positive{ color:var(--positive); }
+    .chg.negative{ color:var(--negative); }
+    .divider { height:10px }
 
-async function getData() {
-  // Gather symbols for Yahoo (include ^TNX for 10Y)
-  const yahooSyms = [
-    ...YAHOO_INDICES.map(i => i.sym),
-    "^TNX",
-    ...AI_UNIVERSE, ...CRYPTO_UNIVERSE, ...ENERGY_UNIVERSE,
-  ];
+    .mover-grid { display:grid; gap:10px 14px; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); margin-top:8px; }
+    .mgroup h3 { margin:0 0 6px; font-size:.8rem; color:var(--blue); letter-spacing:.5px; text-transform:uppercase; }
+    .mlist div { display:flex; justify-content:space-between; font-size:.88rem; padding:1px 0; }
+    .mlist a { font-weight:600; color:inherit; text-decoration:none; }
+    .mlist a:hover { text-decoration:underline; color:var(--blue); }
 
-  let yq = null;
-  try { yq = await yahooQuotes(yahooSyms); }
-  catch (_) { /* Yahoo blocked/401 etc. */ }
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:18px; max-width:1400px; margin:0 auto}
+    .card{background:var(--paper);border-radius:12px;box-shadow:0 2px 6px rgba(0,0,0,.08);padding:16px;overflow:hidden}
+    .card h2{margin:0 0 8px;border-bottom:2px solid var(--blue);padding-bottom:8px;font-size:1.1rem}
+    .section-link{margin:-4px 0 8px}
+    .section-link a{font-size:.9rem;text-decoration:none}
+    .section-link a:hover{text-decoration:underline}
+    .list{max-height:520px;overflow-y:auto;padding-right:8px;min-height:100px}
+    .item{margin:0 0 12px;border-bottom:1px solid #eee;padding:0 0 10px}
+    .item:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0}
+    .item a{color:#0d6efd;text-decoration:none;font-weight:600}
+    .item a:hover{text-decoration:underline}
+    .item p{margin:6px 0 0;color:var(--muted);font-size:.92rem;line-height:1.35}
+    .loading{text-align:center;padding:14px;color:var(--muted);line-height:1.4;}
+    .footer{margin:16px auto 0;text-align:center;color:#8a8f98;font-size:.85rem;max-width:1400px}
+  </style>
+</head>
+<body>
+  <h1>The Cerf Report — Curated News</h1>
+  <div class="subhead">News minus the junk. Tech, finance, and interesting stuff.</div>
 
-  const yMap = mapBy(yq || []);
+  <div class="market" id="market"><div class="loading">Loading market data…</div></div>
 
-  // For any *missing* equities, fetch via Stooq
-  const missing = [];
-  for (const t of [...AI_UNIVERSE, ...CRYPTO_UNIVERSE, ...ENERGY_UNIVERSE]) {
-    if (!yMap.has(t)) missing.push(t);
-  }
-  // Index ETF stand-ins if Yahoo indices missing entirely
-  const needEtfs = [];
-  for (const idx of YAHOO_INDICES) {
-    if (!yMap.has(idx.sym)) {
-      const etf = ETF_FALLBACK[idx.sym];
-      if (etf) needEtfs.push(etf);
+  <div class="grid">
+    <div class="card" id="front-card">
+      <h2>Front Page</h2>
+      <div class="list"><div class="loading">Loading…</div></div>
+    </div>
+    <div class="card" id="tech-card">
+      <h2>Technology</h2>
+      <div class="list"><div class="loading">Loading…</div></div>
+    </div>
+    <div class="card" id="world-card">
+      <h2>World News</h2>
+      <div class="list"><div class="loading">Loading…</div></div>
+    </div>
+    <div class="card" id="finance-card">
+      <h2>Finance</h2>
+      <div class="list"><div class="loading">Loading…</div></div>
+    </div>
+    <div class="card" id="cerf-card">
+      <h2>The Cerf Report</h2>
+      <div class="section-link">
+        <a href="https://thecerfreport.substack.com/" target="_blank" rel="noopener noreferrer">
+          thecerfreport.substack.com →
+        </a>
+      </div>
+      <div class="list"><div class="loading">Loading…</div></div>
+    </div>
+  </div>
+
+  <div class="footer" id="updatedAt"></div>
+
+  <script>
+    const ABS = (path) => new URL(path, location.origin).toString(); // absolute URLs avoid path issues
+    const FINANCE = (t) => `https://finance.yahoo.com/quote/${encodeURIComponent(t)}`;
+    const $ = (sel, root=document) => root.querySelector(sel);
+
+    const sections = [
+      { id: "front-card",   section: "frontpage" },
+      { id: "tech-card",    section: "tech" },
+      { id: "world-card",   section: "world" },
+      { id: "finance-card", section: "finance" },
+    ];
+
+    function fmt(n, d=2){ if(n==null || isNaN(n)) return "—"; return (+n).toFixed(d); }
+    function chipHTML(q){
+      const sign = (q.d ?? 0) >= 0 ? "+" : "";
+      const cls  = (q.d ?? 0) >= 0 ? "positive" : "negative";
+      return `<span class="chip">
+        <a href="${FINANCE(q.ticker)}" target="_blank" rel="noopener">${q.name}</a>
+        <span class="price">${fmt(q.c)}</span>
+        <span class="chg ${cls}">${sign}${fmt(q.d)} (${sign}${fmt(q.dp)}%)</span>
+      </span>`;
     }
-  }
-
-  let sMap = new Map();
-  if (missing.length || needEtfs.length) {
-    const st = await stooqQuotes([...missing, ...needEtfs]);
-    sMap = mapBy(st);
-  }
-
-  // Build indices row
-  const indices = [];
-  for (const idx of YAHOO_INDICES) {
-    let q = yMap.get(idx.sym);
-    if (!q) {
-      const etf = ETF_FALLBACK[idx.sym];
-      if (etf) q = sMap.get(etf);
-    }
-    if (q) indices.push({ name: idx.name, ticker: q.ticker, c:q.c, d:q.d, dp:q.dp });
-  }
-
-  // Add BTC and Gold
-  const [btc, gold] = await Promise.all([getBTC(), getGold()]);
-  if (btc) indices.push(btc);
-  if (gold) indices.push(gold);
-
-  // US 10Y if available via Yahoo (^TNX yields*10)
-  const tnx = yMap.get("^TNX");
-  if (tnx && isNum(tnx.c)) {
-    indices.push({ ticker:"US10Y", name:"US 10Y", c: tnx.c/10, d: isNum(tnx.d)? tnx.d/10 : null, dp: tnx.dp });
-  }
-
-  // Build movers from biggest abs % change
-  const quoteMap = new Map([...yMap, ...sMap]); // prefer Yahoo where present
-  const movers = {
-    ai:     topMovers(AI_UNIVERSE,     quoteMap, 8),
-    crypto: topMovers(CRYPTO_UNIVERSE, quoteMap, 8),
-    energy: topMovers(ENERGY_UNIVERSE, quoteMap, 8),
-  };
-
-  return { indices, movers };
-}
-
-// ---------- Handler ----------
-exports.handler = async function () {
-  try {
-    const data = await getData();
-    const hasSomething =
-      (data.indices && data.indices.length) ||
-      (data.movers && (data.movers.ai.length || data.movers.crypto.length || data.movers.energy.length));
-
-    if (hasSomething) {
-      const payload = { status:"ok", data, ts: Date.now() };
-      writeCache(payload);
-      return { statusCode:200, headers:HEADERS, body: JSON.stringify({ status:"ok", data, source:"live" }) };
+    function listHTML(arr){
+      return (arr||[]).map(q=>{
+        const sign=(q.d??0)>=0?"+":""; const cls=(q.d??0)>=0?"positive":"negative";
+        return `<div>
+          <a href="${FINANCE(q.ticker)}" target="_blank" rel="noopener">${q.ticker}</a>
+          <span class="${cls}">${sign}${fmt(q.d)} (${sign}${fmt(q.dp)}%)</span>
+        </div>`;
+      }).join('');
     }
 
-    const cached = readCache();
-    if (cached && cached.status === "ok") {
-      return { statusCode:200, headers:HEADERS, body: JSON.stringify({ status:"ok", data: cached.data, source:"cache" }) };
+    function renderMarket(data){
+      const m = $('#market');
+      if(!data){ m.innerHTML = '<div class="loading">Could not load market data.</div>'; return; }
+      const macro   = (data.macro||[]).map(chipHTML).join(' • ');
+      const indices = (data.indices||[]).map(chipHTML).join(' • ');
+      const ai      = listHTML(data.ai);
+      const crypto  = listHTML(data.crypto);
+      const energy  = listHTML(data.energy);
+      m.innerHTML = `
+        <div class="row">${macro}</div>
+        <div class="divider"></div>
+        <div class="row">${indices}</div>
+        <div class="mover-grid">
+          <div class="mgroup"><h3>AI</h3><div class="mlist">${ai}</div></div>
+          <div class="mgroup"><h3>CRYPTO</h3><div class="mlist">${crypto}</div></div>
+          <div class="mgroup"><h3>ENERGY</h3><div class="mlist">${energy}</div></div>
+        </div>`;
     }
 
-    return { statusCode:500, headers:HEADERS, body: JSON.stringify({ status:"error", message:"No market data available" }) };
-  } catch (e) {
-    const cached = readCache();
-    if (cached && cached.status === "ok") {
-      return { statusCode:200, headers:HEADERS, body: JSON.stringify({ status:"ok", data: cached.data, source:"cache" }) };
+    function renderNewsList(listEl, articles){
+      if(!articles || !articles.length){
+        listEl.innerHTML = '<div class="loading">Could not load news at this time.</div>';
+        return;
+      }
+      listEl.innerHTML = "";
+      for(const a of articles){
+        if(!a || !a.title) continue;
+        const div = document.createElement("div");
+        div.className = "item";
+        div.innerHTML = `<a href="${a.url}" target="_blank" rel="noopener noreferrer">${a.title}</a>
+                         <p>${a.description ? a.description : ""}</p>`;
+        listEl.appendChild(div);
+      }
     }
-    return { statusCode:500, headers:HEADERS, body: JSON.stringify({ status:"error", message: e.message }) };
-  }
-};
+
+    async function fetchJSON(url){
+      try{
+        const r = await fetch(url, { redirect: "follow" });
+        if(!r.ok) throw new Error(`HTTP ${r.status}`);
+        return await r.json();
+      }catch(e){
+        console.error("Fetch failed:", url, e);
+        throw e;
+      }
+    }
+
+    async function fetchMarket(){
+      const data = await fetchJSON(ABS("/.netlify/functions/market-data"));
+      if(data.status !== "ok" || !data.data) throw new Error("Bad market payload");
+      return data.data;
+    }
+    async function fetchNews(section){
+      const data = await fetchJSON(ABS(`/.netlify/functions/news?section=${encodeURIComponent(section)}`));
+      if(data.status !== "ok") return [];
+      return data.articles || [];
+    }
+    async function fetchCerf(){
+      const data = await fetchJSON(ABS("/.netlify/functions/substack?mode=archive"));
+      if(data.status !== "ok" || !Array.isArray(data.articles)) return [];
+      return data.articles.map(a=>({ title:a.title||"Untitled", url:a.url, description:a.description||"" }));
+    }
+
+    async function updateAll(){
+      // Market
+      try{
+        const market = await fetchMarket();
+        renderMarket(market);
+      }catch(e){
+        console.error("Market error:", e);
+        renderMarket(null);
+      }
+
+      // News
+      try{
+        const results = await Promise.all([
+          ...sections.map(s => fetchNews(s.section).catch(err => (console.error(s.section, err), []))),
+          fetchCerf().catch(err => (console.error("substack", err), []))
+        ]);
+        sections.forEach((s, i) => renderNewsList($(`#${s.id} .list`), results[i]));
+        renderNewsList($("#cerf-card .list"), results[results.length-1]);
+      }catch(e){
+        console.error("News update error:", e);
+        // Ensure we clear "Loading…" even on fatal errors
+        sections.forEach(s => renderNewsList($(`#${s.id} .list`), []));
+        renderNewsList($("#cerf-card .list"), []);
+      }
+
+      $("#updatedAt").textContent = "Updated " + new Date().toLocaleString();
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+      updateAll();
+      setInterval(updateAll, 5 * 60 * 1000);
+    });
+  </script>
+</body>
+</html>
