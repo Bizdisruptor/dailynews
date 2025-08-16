@@ -1,125 +1,129 @@
-// netlify/functions/news.js
-// Fetches news from multiple APIs and caches the last successful result.
+// netlify/functions/market-data.js
+// Fetches market data using Yahoo Finance and caches the last successful result.
 const fs = require("fs");
-const fetch = require("node-fetch"); // ✅ FIX: Added the required fetch library.
+const fetch = require("node-fetch");
 
 const HEADERS = { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" };
+const CACHE_FILE = "/tmp/market-cache.json";
 
-// --- API Configurations ---
-const APIS = [
-  { name: 'NewsAPI', fetcher: fetchFromNewsAPI, transformer: (article) => article },
-  { name: 'GNews', fetcher: fetchFromGNews, transformer: transformGNewsArticle },
-  { name: 'Newsdata.io', fetcher: fetchFromNewsdata, transformer: transformNewsdataArticle },
-];
-const FINANCE_FALLBACK = { name: 'Finnhub', fetcher: fetchFromFinnhub, transformer: transformFinnhubArticle };
+// Universes for top movers
+const AI_UNIVERSE = ["NVDA", "MSFT", "GOOG", "AMD", "AVGO", "META", "AAPL", "TSLA", "SMCI", "ASML", "MU", "TSM"];
+const CRYPTO_UNIVERSE = ["COIN", "MSTR", "MARA", "RIOT", "CLSK", "HUT", "BITF", "IREN", "CIFR", "WULF"];
+const ENERGY_UNIVERSE = ["XOM", "CVX", "SLB", "OXY", "COP", "DVN", "EOG", "PXD", "HAL", "MRO", "APA"];
+
+// Symbols for indices and macro assets
+const YAHOO_SYMBOLS = {
+  indices: [
+    { sym: "^DJI", name: "Dow Jones" },
+    { sym: "^GSPC", name: "S&P 500" },
+    { sym: "^IXIC", name: "NASDAQ" },
+  ],
+  macro: [
+    { sym: "BTC-USD", name: "Bitcoin" },
+    { sym: "GC=F", name: "Gold" },
+    { sym: "^TNX", name: "US 10Y" },
+  ]
+};
 
 // --- Caching Utilities ---
-function readCache(section) {
-  const cacheFile = `/tmp/news-cache-${section}.json`;
+function readCache() {
   try {
-    if (fs.existsSync(cacheFile)) return JSON.parse(fs.readFileSync(cacheFile, "utf8"));
+    if (fs.existsSync(CACHE_FILE)) return JSON.parse(fs.readFileSync(CACHE_FILE, "utf8"));
   } catch (_) {}
   return null;
 }
-function writeCache(section, articles) {
-  const cacheFile = `/tmp/news-cache-${section}.json`;
+
+function writeCache(obj) {
   try {
-    fs.writeFileSync(cacheFile, JSON.stringify(articles));
+    fs.writeFileSync(CACHE_FILE, JSON.stringify(obj));
   } catch (_) {}
 }
 
-// --- Fetcher and Transformer Functions ---
-async function fetchFromNewsAPI(section) {
-  const NEWSAPI_BASE = "https://newsapi.org/v2";
-  const NEWSAPI_CONFIG = {
-    world: { endpoint: "top-headlines", params: { language: "en", pageSize: 15, sources: "associated-press,reuters,bbc-news" }},
-    tech: { endpoint: "top-headlines", params: { language: "en", pageSize: 12, sources: "techcrunch,the-verge,engadget,axios,ars-technica" }},
-    finance: { endpoint: "everything", params: { language: "en", sortBy: "publishedAt", pageSize: 12, q: "(stocks OR markets OR bonds OR inflation OR fed OR earnings)", domains: "reuters.com,cnbc.com,marketwatch.com,barrons.com,wsj.com,fortune.com,financialpost.com"}},
-    frontpage: { endpoint: "everything", params: { language: "en", sortBy: "publishedAt", pageSize: 18, q: "(election OR border OR crime OR war OR trade OR tariffs OR immigration OR protest OR courts)", domains: "reuters.com,apnews.com,bbc.com,cnbc.com,nypost.com,wsj.com,abcnews.go.com,nbcnews.com,foxnews.com,newsweek.com"}}
-  };
-  const cfg = NEWSAPI_CONFIG[section] || NEWSAPI_CONFIG.world;
-  const url = new URL(`${NEWSAPI_BASE}/${cfg.endpoint}`);
-  for (const [k, v] of Object.entries(cfg.params)) {
-    if (v) url.searchParams.set(k, v);
+// --- Data Fetching and Processing ---
+async function yahooQuotes(symbols) {
+  const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbols.join(","))}`;
+  const r = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
+  if (!r.ok) throw new Error(`Yahoo HTTP ${r.status}`);
+  const raw = await r.json();
+  const arr = raw?.quoteResponse?.result || [];
+  return arr.map(q => ({
+    ticker: q.symbol,
+    name: q.shortName || q.longName || q.symbol,
+    c: q.regularMarketPrice ?? null,
+    d: q.regularMarketChange ?? null,
+    dp: q.regularMarketChangePercent ?? null,
+  }));
+}
+
+function mapBy(arr, key = "ticker") {
+  const m = new Map();
+  (arr || []).forEach(x => m.set(x[key], x));
+  return m;
+}
+
+function topMovers(tickers, quoteMap, count = 8) {
+  const rows = [];
+  for (const t of tickers) {
+    const q = quoteMap.get(t);
+    if (q && typeof q.dp === 'number' && Number.isFinite(q.dp)) {
+      rows.push({ ticker: t, c: q.c, d: q.d, dp: q.dp });
+    }
   }
-  const response = await fetch(url.toString(), { headers: { "X-Api-Key": process.env.NEWSAPI_KEY } });
-  if (!response.ok) throw new Error(`Status: ${response.status}`);
-  const data = await response.json();
-  if (data.status !== 'ok' || data.totalResults === 0) throw new Error(data.message || 'No articles found');
-  return data.articles;
+  rows.sort((a, b) => Math.abs(b.dp) - Math.abs(a.dp));
+  return rows.slice(0, count);
 }
 
-function transformGNewsArticle(article) { return { title: article.title, description: article.description, url: article.url, publishedAt: article.publishedAt }; }
-async function fetchFromGNews(section) {
-  const GNEWS_CATEGORY_MAP = { world: 'world', tech: 'technology', finance: 'business', frontpage: 'general' };
-  const category = GNEWS_CATEGORY_MAP[section] || 'general';
-  const url = `https://gnews.io/api/v4/top-headlines?category=${category}&lang=en&max=15&apikey=${process.env.GNEWS_API_KEY}`;
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`Status: ${response.status}`);
-  const data = await response.json();
-  if (!data.articles || data.articles.length === 0) throw new Error('No articles found');
-  return data.articles;
-}
+async function getData() {
+  const allYahooSyms = [
+    ...YAHOO_SYMBOLS.indices.map(i => i.sym),
+    ...YAHOO_SYMBOLS.macro.map(m => m.sym),
+    ...AI_UNIVERSE, ...CRYPTO_UNIVERSE, ...ENERGY_UNIVERSE,
+  ];
 
-function transformNewsdataArticle(article) { return { title: article.title, description: article.description, url: article.link, publishedAt: article.pubDate }; }
-async function fetchFromNewsdata(section) {
-    const NEWSDATA_CATEGORY_MAP = { world: 'world', tech: 'technology', finance: 'business', frontpage: 'top' };
-    const category = NEWSDATA_CATEGORY_MAP[section] || 'top';
-    const url = `https://newsdata.io/api/1/news?apikey=${process.env.NEWSDATA_KEY}&language=en&category=${category}`;
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`Status: ${response.status}`);
-    const data = await response.json();
-    if (data.status !== 'success' || !data.results || data.results.length === 0) throw new Error('No articles found');
-    return data.results;
-}
+  const quotes = await yahooQuotes(allYahooSyms);
+  const quoteMap = mapBy(quotes);
 
-function transformFinnhubArticle(article) { return { title: article.headline, description: article.summary, url: article.url, publishedAt: new Date(article.datetime * 1000).toISOString() }; }
-async function fetchFromFinnhub() {
-  const url = `https://finnhub.io/api/v1/news?category=general&token=${process.env.FINNHUB_API_KEY}`;
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`Status: ${response.status}`);
-  const data = await response.json();
-  if (!data || data.length === 0) throw new Error('No articles found');
-  return data.slice(0, 15);
+  const getQuoteData = (config) => {
+      const quote = quoteMap.get(config.sym);
+      if (!quote) return null;
+      if (config.sym === "^TNX") {
+          return { name: config.name, ticker: "US10Y", c: quote.c, d: quote.d, dp: quote.dp };
+      }
+      return { name: config.name, ticker: quote.ticker, c: quote.c, d: quote.d, dp: quote.dp };
+  };
+
+  const indices = YAHOO_SYMBOLS.indices.map(getQuoteData).filter(Boolean);
+  const macro = YAHOO_SYMBOLS.macro.map(getQuoteData).filter(Boolean);
+
+  const movers = {
+    ai: topMovers(AI_UNIVERSE, quoteMap, 8),
+    crypto: topMovers(CRYPTO_UNIVERSE, quoteMap, 8),
+    energy: topMovers(ENERGY_UNIVERSE, quoteMap, 8),
+  };
+
+  return { indices, macro, ...movers };
 }
 
 // --- Main Handler ---
-exports.handler = async function(event) {
-  const section = (event.queryStringParameters?.section || "world").toLowerCase();
+exports.handler = async function () {
+  try {
+    const data = await getData();
+    const hasSomething = data.indices.length || data.macro.length || data.ai.length;
 
-  for (const api of APIS) {
-    try {
-      console.log(`Attempting to fetch '${section}' from ${api.name}...`);
-      const rawArticles = await api.fetcher(section);
-      const articles = rawArticles.map(api.transformer);
-      writeCache(section, articles);
-      console.log(`Successfully fetched from ${api.name} and updated cache for '${section}'.`);
-      return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ status: "ok", articles, source: api.name }) };
-    } catch (error) {
-      console.warn(`${api.name} failed for '${section}': ${error.message}. Trying next...`);
+    if (hasSomething) {
+      const payload = { status: "ok", data, ts: Date.now() };
+      writeCache(payload);
+      return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ status: "ok", data, source: "live" }) };
     }
-  }
-
-  if (section === 'finance') {
-    try {
-      console.log("Trying Finnhub as final fallback for 'finance'...");
-      const rawArticles = await FINANCE_FALLBACK.fetcher();
-      const articles = rawArticles.map(FINANCE_FALLBACK.transformer);
-      writeCache(section, articles);
-      console.log(`Successfully fetched from Finnhub and updated cache for '${section}'.`);
-      return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ status: "ok", articles, source: FINANCE_FALLBACK.name }) };
-    } catch (finnhubError) {
-      console.error(`Finnhub fallback also failed: ${finnhubError.message}`);
+    throw new Error("Live data was empty.");
+  } catch (e) {
+    console.warn(`Live market data fetch failed: ${e.message}. Attempting to serve from cache.`);
+    const cached = readCache();
+    if (cached && cached.status === "ok") {
+      console.log("Serving stale market data from cache.");
+      return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ status: "ok", data: cached.data, source: "cache" }) };
     }
+    console.error("Cache is empty. No market data to serve.");
+    return { statusCode: 500, headers: HEADERS, body: JSON.stringify({ status: "error", message: "Market data is currently unavailable." }) };
   }
-
-  console.log(`All APIs failed for '${section}'. Attempting to load from cache.`);
-  const cachedArticles = readCache(section);
-  if (cachedArticles) {
-    console.log(`Successfully loaded ${cachedArticles.length} articles from cache for '${section}'.`);
-    return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ status: "ok", articles: cachedArticles, source: 'cache' }) };
-  }
-
-  console.error(`Cache is empty for '${section}'. No data to serve.`);
-  return { statusCode: 500, headers: HEADERS, body: JSON.stringify({ status: "error", message: "All news sources are currently unavailable." }) };
 };
