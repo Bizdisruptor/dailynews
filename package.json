@@ -3,6 +3,6 @@
   "version": "1.0.0",
   "description": "Dependencies for Netlify functions",
   "dependencies": {
-    "@netlify/blobs": "^7.5.1"
+    "@netlify/blobs": "^6.4.0"
   }
 }
