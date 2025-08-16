@@ -1,286 +1,125 @@
-// netlify/functions/news.js  (CommonJS)
-// Robust news with provider round-robin + stale cache fallback.
-// Providers (in order): NewsAPI -> TheNewsAPI -> RSS -> /tmp stale cache
+// netlify/functions/news.js
+// Fetches news from multiple APIs and caches the last successful result.
+const fs = require("fs");
+const fetch = require("node-fetch"); // ✅ FIX: Added the required fetch library.
 
-const HEADERS = {
-  "Content-Type": "application/json",
-  "Access-Control-Allow-Origin": "*",
-};
+const HEADERS = { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" };
 
-// --- Provider config ---------------------------------------------------------
+// --- API Configurations ---
+const APIS = [
+  { name: 'NewsAPI', fetcher: fetchFromNewsAPI, transformer: (article) => article },
+  { name: 'GNews', fetcher: fetchFromGNews, transformer: transformGNewsArticle },
+  { name: 'Newsdata.io', fetcher: fetchFromNewsdata, transformer: transformNewsdataArticle },
+];
+const FINANCE_FALLBACK = { name: 'Finnhub', fetcher: fetchFromFinnhub, transformer: transformFinnhubArticle };
 
-const HAS_NEWSAPI = !!process.env.NEWSAPI_KEY;
-const HAS_THENEWSAPI = !!process.env.THENEWSAPI_KEY;
-
-// RSS fallbacks (no key). We'll round-robin inside each list.
-const RSS = {
-  frontpage: [
-    "https://feeds.reuters.com/reuters/topNews",
-    "https://feeds.bbci.co.uk/news/rss.xml",
-    "https://www.npr.org/rss/rss.php?id=1001", // NPR Top Stories
-  ],
-  world: [
-    "https://feeds.reuters.com/reuters/worldNews",
-    "https://feeds.bbci.co.uk/news/world/rss.xml",
-    "https://www.npr.org/rss/rss.php?id=1004", // NPR World
-  ],
-  tech: [
-    "https://techcrunch.com/feed/",
-    "https://www.theverge.com/rss/index.xml",
-    "https://feeds.arstechnica.com/arstechnica/index",
-  ],
-  finance: [
-    "https://feeds.content.dowjones.io/public/rss/mw_topstories", // MarketWatch
-    "https://www.cnbc.com/id/100003114/device/rss/rss.html",      // CNBC Top News
-    "https://finance.yahoo.com/news/rssindex",                    // Yahoo Finance news
-  ],
-};
-
-// Map UI "section" => NewsAPI category
-const NEWSAPI_CAT = {
-  frontpage: "general",
-  world: "general",
-  tech: "technology",
-  finance: "business",
-};
-
-// Map UI "section" => TheNewsAPI categories
-// (TheNewsAPI accepts categories like: business, tech, world, etc.)
-const THENEWSAPI_CAT = {
-  frontpage: "",         // no category => general top headlines
-  world: "world",
-  tech: "tech",
-  finance: "business",
-};
-
-// --- Utilities ---------------------------------------------------------------
-
-const SECTIONS = ["frontpage", "world", "tech", "finance"];
-
-// In-memory state survives warm Lambda invocations.
-const RR = Object.fromEntries(SECTIONS.map(s => [s, 0])); // round-robin index
-const CACHE = Object.fromEntries(SECTIONS.map(s => [s, { ts: 0, articles: [] }]));
-const CACHE_FILE = "/tmp/news-cache.json";
-
-async function readDiskCache() {
+// --- Caching Utilities ---
+function readCache(section) {
+  const cacheFile = `/tmp/news-cache-${section}.json`;
   try {
-    const fs = require("fs");
-    if (fs.existsSync(CACHE_FILE)) {
-      const raw = fs.readFileSync(CACHE_FILE, "utf8");
-      const json = JSON.parse(raw);
-      for (const s of SECTIONS) {
-        if (json[s]) CACHE[s] = json[s];
-      }
-    }
+    if (fs.existsSync(cacheFile)) return JSON.parse(fs.readFileSync(cacheFile, "utf8"));
   } catch (_) {}
-}
-async function writeDiskCache() {
-  try {
-    const fs = require("fs");
-    fs.writeFileSync(CACHE_FILE, JSON.stringify(CACHE));
-  } catch (_) {}
-}
-
-// Simple RSS parsing (title/link/description/pubDate)
-function unescapeHtml(s = "") {
-  return s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
-}
-function stripTags(s = "") {
-  return s.replace(/<\/?[^>]+(>|$)/g, "").trim();
-}
-function parseRss(xml) {
-  const out = [];
-  const itemRe = /<item>([\s\S]*?)<\/item>/gi;
-  let m;
-  while ((m = itemRe.exec(xml))) {
-    const chunk = m[1];
-    const pick = (tag) => {
-      const rx = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i");
-      const mm = rx.exec(chunk);
-      return mm ? unescapeHtml(mm[1].trim()) : "";
-    };
-    out.push({
-      title: stripTags(pick("title")),
-      url: pick("link"),
-      description: stripTags(pick("description")),
-      publishedAt: pick("pubDate"),
-    });
-  }
-  return out.filter(a => a.title && a.url);
-}
-
-async function fetchJson(url, headers) {
-  const r = await fetch(url, { headers, redirect: "follow" });
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  return r.json();
-}
-async function fetchText(url, headers) {
-  const r = await fetch(url, { headers, redirect: "follow" });
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  return r.text();
-}
-
-// Normalize to {title,url,description}
-function normArticles(list) {
-  return (list || [])
-    .map(a => ({
-      title: a?.title || a?.headline || "",
-      url: a?.url || a?.link || "",
-      description: a?.description || a?.snippet || ""
-    }))
-    .filter(x => x.title && x.url);
-}
-
-// --- Providers ---------------------------------------------------------------
-
-async function getNewsapi(section) {
-  if (!HAS_NEWSAPI) return null;
-  const cat = NEWSAPI_CAT[section] || "general";
-  const url = `https://newsapi.org/v2/top-headlines?country=us&category=${encodeURIComponent(cat)}&pageSize=12`;
-  const data = await fetchJson(url, { "X-Api-Key": process.env.NEWSAPI_KEY, "Accept": "application/json" });
-  const articles = (data.articles || [])
-    .filter(a => a && a.title && a.title !== "[Removed]")
-    .map(a => ({ title: a.title, url: a.url, description: a.description || "" }));
-  return articles.length ? articles : null;
-}
-
-async function getTheNewsAPI(section) {
-  if (!HAS_THENEWSAPI) return null;
-  const key = process.env.THENEWSAPI_KEY;
-  const cat = (THENEWSAPI_CAT[section] || "").trim();
-
-  // Try /v1/news/top first
-  const p = new URLSearchParams({
-    api_token: key,
-    locale: "us",        // prefer US edition
-    language: "en",
-    limit: "12"
-  });
-  if (cat) p.set("categories", cat);
-
-  const base = "https://api.thenewsapi.com/v1/news/top";
-  try {
-    const data = await fetchJson(`${base}?${p.toString()}`, { "Accept": "application/json" });
-    const list = Array.isArray(data?.data) ? data.data : Array.isArray(data?.articles) ? data.articles : [];
-    const articles = normArticles(list);
-    if (articles.length) return articles;
-  } catch (_) {}
-
-  // Fallback to /v1/news/all
-  const base2 = "https://api.thenewsapi.com/v1/news/all";
-  try {
-    const data2 = await fetchJson(`${base2}?${p.toString()}`, { "Accept": "application/json" });
-    const list2 = Array.isArray(data2?.data) ? data2.data : Array.isArray(data2?.articles) ? data2.articles : [];
-    const articles2 = normArticles(list2);
-    if (articles2.length) return articles2;
-  } catch (_) {}
-
   return null;
 }
-
-async function getRssRoundRobin(section) {
-  const feeds = RSS[section] || [];
-  if (!feeds.length) return null;
-  const startIdx = RR[section] % feeds.length;
-
-  // Try up to feeds.length feeds, starting from current RR index
-  for (let i = 0; i < feeds.length; i++) {
-    const idx = (startIdx + i) % feeds.length;
-    const feedUrl = feeds[idx];
-    try {
-      const xml = await fetchText(feedUrl, {
-        "User-Agent": "Mozilla/5.0 (NetlifyFunction)",
-        "Accept": "application/rss+xml, application/xml;q=0.9, */*;q=0.8",
-      });
-      const items = parseRss(xml);
-      if (items && items.length) {
-        RR[section] = idx + 1; // advance RR after success
-        const mapped = items.slice(0, 12).map(a => ({
-          title: a.title,
-          url: a.url,
-          description: a.description || "",
-        }));
-        return mapped;
-      }
-    } catch (_) {
-      // try next feed
-    }
-  }
-  return null;
-}
-
-// Helper to get one section with provider chain + cache
-async function getSectionArticles(section) {
-  // 1) NewsAPI
-  let articles = null;
-  try { articles = await getNewsapi(section); } catch (_) {}
-
-  // 2) TheNewsAPI
-  if (!articles || !articles.length) {
-    try { articles = await getTheNewsAPI(section); } catch (_) {}
-  }
-
-  // 3) RSS round-robin
-  if (!articles || !articles.length) {
-    try { articles = await getRssRoundRobin(section); } catch (_) {}
-  }
-
-  // 4) Cache fallback
-  if (!articles || !articles.length) {
-    const cached = CACHE[section]?.articles || [];
-    return { articles: cached, stale: true };
-  }
-
-  CACHE[section] = { ts: Date.now(), articles };
-  await writeDiskCache();
-  return { articles, stale: false };
-}
-
-// --- Main handler ------------------------------------------------------------
-
-exports.handler = async function (event) {
+function writeCache(section, articles) {
+  const cacheFile = `/tmp/news-cache-${section}.json`;
   try {
-    await readDiskCache();
+    fs.writeFileSync(cacheFile, JSON.stringify(articles));
+  } catch (_) {}
+}
 
-    const raw = (event.queryStringParameters?.section || "frontpage").toLowerCase();
-
-    // Accept: "frontpage", "frontpage,world", "frontpage|world|tech|finance", or "all"
-    const requested = raw === "all"
-      ? SECTIONS
-      : raw.split(/[|,]/).map(s => s.trim()).filter(Boolean);
-
-    const uniq = [...new Set(requested)].filter(s => SECTIONS.includes(s));
-    if (!uniq.length) {
-      return { statusCode: 400, headers: HEADERS, body: JSON.stringify({ status: "error", message: "Unknown section" }) };
-    }
-
-    // Single section (keep legacy shape)
-    if (uniq.length === 1) {
-      const s = uniq[0];
-      const { articles, stale } = await getSectionArticles(s);
-      return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ status: "ok", articles, stale }) };
-    }
-
-    // Multiple sections
-    const out = {};
-    for (const s of uniq) out[s] = await getSectionArticles(s);
-    return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ status: "ok", sections: out }) };
-  } catch (e) {
-    // Try serve cache on unexpected error
-    try {
-      await readDiskCache();
-      const raw = (event.queryStringParameters?.section || "frontpage").toLowerCase();
-      const req = raw === "all" ? SECTIONS : raw.split(/[|,]/).map(s => s.trim()).filter(Boolean);
-      const uniq = [...new Set(req)].filter(s => SECTIONS.includes(s));
-      if (uniq.length === 1) {
-        const cached = CACHE[uniq[0]]?.articles || [];
-        if (cached.length) return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ status: "ok", articles: cached, stale: true }) };
-      } else if (uniq.length > 1) {
-        const out = {};
-        for (const s of uniq) out[s] = { articles: (CACHE[s]?.articles || []), stale: true };
-        return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ status: "ok", sections: out }) };
-      }
-    } catch (_) {}
-    return { statusCode: 500, headers: HEADERS, body: JSON.stringify({ status: "error", message: e.message }) };
+// --- Fetcher and Transformer Functions ---
+async function fetchFromNewsAPI(section) {
+  const NEWSAPI_BASE = "https://newsapi.org/v2";
+  const NEWSAPI_CONFIG = {
+    world: { endpoint: "top-headlines", params: { language: "en", pageSize: 15, sources: "associated-press,reuters,bbc-news" }},
+    tech: { endpoint: "top-headlines", params: { language: "en", pageSize: 12, sources: "techcrunch,the-verge,engadget,axios,ars-technica" }},
+    finance: { endpoint: "everything", params: { language: "en", sortBy: "publishedAt", pageSize: 12, q: "(stocks OR markets OR bonds OR inflation OR fed OR earnings)", domains: "reuters.com,cnbc.com,marketwatch.com,barrons.com,wsj.com,fortune.com,financialpost.com"}},
+    frontpage: { endpoint: "everything", params: { language: "en", sortBy: "publishedAt", pageSize: 18, q: "(election OR border OR crime OR war OR trade OR tariffs OR immigration OR protest OR courts)", domains: "reuters.com,apnews.com,bbc.com,cnbc.com,nypost.com,wsj.com,abcnews.go.com,nbcnews.com,foxnews.com,newsweek.com"}}
+  };
+  const cfg = NEWSAPI_CONFIG[section] || NEWSAPI_CONFIG.world;
+  const url = new URL(`${NEWSAPI_BASE}/${cfg.endpoint}`);
+  for (const [k, v] of Object.entries(cfg.params)) {
+    if (v) url.searchParams.set(k, v);
   }
+  const response = await fetch(url.toString(), { headers: { "X-Api-Key": process.env.NEWSAPI_KEY } });
+  if (!response.ok) throw new Error(`Status: ${response.status}`);
+  const data = await response.json();
+  if (data.status !== 'ok' || data.totalResults === 0) throw new Error(data.message || 'No articles found');
+  return data.articles;
+}
+
+function transformGNewsArticle(article) { return { title: article.title, description: article.description, url: article.url, publishedAt: article.publishedAt }; }
+async function fetchFromGNews(section) {
+  const GNEWS_CATEGORY_MAP = { world: 'world', tech: 'technology', finance: 'business', frontpage: 'general' };
+  const category = GNEWS_CATEGORY_MAP[section] || 'general';
+  const url = `https://gnews.io/api/v4/top-headlines?category=${category}&lang=en&max=15&apikey=${process.env.GNEWS_API_KEY}`;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Status: ${response.status}`);
+  const data = await response.json();
+  if (!data.articles || data.articles.length === 0) throw new Error('No articles found');
+  return data.articles;
+}
+
+function transformNewsdataArticle(article) { return { title: article.title, description: article.description, url: article.link, publishedAt: article.pubDate }; }
+async function fetchFromNewsdata(section) {
+    const NEWSDATA_CATEGORY_MAP = { world: 'world', tech: 'technology', finance: 'business', frontpage: 'top' };
+    const category = NEWSDATA_CATEGORY_MAP[section] || 'top';
+    const url = `https://newsdata.io/api/1/news?apikey=${process.env.NEWSDATA_KEY}&language=en&category=${category}`;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`Status: ${response.status}`);
+    const data = await response.json();
+    if (data.status !== 'success' || !data.results || data.results.length === 0) throw new Error('No articles found');
+    return data.results;
+}
+
+function transformFinnhubArticle(article) { return { title: article.headline, description: article.summary, url: article.url, publishedAt: new Date(article.datetime * 1000).toISOString() }; }
+async function fetchFromFinnhub() {
+  const url = `https://finnhub.io/api/v1/news?category=general&token=${process.env.FINNHUB_API_KEY}`;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Status: ${response.status}`);
+  const data = await response.json();
+  if (!data || data.length === 0) throw new Error('No articles found');
+  return data.slice(0, 15);
+}
+
+// --- Main Handler ---
+exports.handler = async function(event) {
+  const section = (event.queryStringParameters?.section || "world").toLowerCase();
+
+  for (const api of APIS) {
+    try {
+      console.log(`Attempting to fetch '${section}' from ${api.name}...`);
+      const rawArticles = await api.fetcher(section);
+      const articles = rawArticles.map(api.transformer);
+      writeCache(section, articles);
+      console.log(`Successfully fetched from ${api.name} and updated cache for '${section}'.`);
+      return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ status: "ok", articles, source: api.name }) };
+    } catch (error) {
+      console.warn(`${api.name} failed for '${section}': ${error.message}. Trying next...`);
+    }
+  }
+
+  if (section === 'finance') {
+    try {
+      console.log("Trying Finnhub as final fallback for 'finance'...");
+      const rawArticles = await FINANCE_FALLBACK.fetcher();
+      const articles = rawArticles.map(FINANCE_FALLBACK.transformer);
+      writeCache(section, articles);
+      console.log(`Successfully fetched from Finnhub and updated cache for '${section}'.`);
+      return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ status: "ok", articles, source: FINANCE_FALLBACK.name }) };
+    } catch (finnhubError) {
+      console.error(`Finnhub fallback also failed: ${finnhubError.message}`);
+    }
+  }
+
+  console.log(`All APIs failed for '${section}'. Attempting to load from cache.`);
+  const cachedArticles = readCache(section);
+  if (cachedArticles) {
+    console.log(`Successfully loaded ${cachedArticles.length} articles from cache for '${section}'.`);
+    return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ status: "ok", articles: cachedArticles, source: 'cache' }) };
+  }
+
+  console.error(`Cache is empty for '${section}'. No data to serve.`);
+  return { statusCode: 500, headers: HEADERS, body: JSON.stringify({ status: "error", message: "All news sources are currently unavailable." }) };
 };
