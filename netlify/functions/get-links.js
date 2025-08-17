@@ -1,53 +1,90 @@
 // netlify/functions/get-links.js
-// Reads curated article links from a Google Sheet published as a CSV.
+// Reads curated links from a Google Sheet with a robust caching strategy.
 const fetch = require("node-fetch");
+const fs = require("fs");
 
-// IMPORTANT: This must be the URL from the "Publish to web" dialog
-// after you select "Comma-separated values (.csv)".
+const HEADERS = { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" };
+const CACHE_FILE = "/tmp/recommended-cache.json";
+const TTL_MS = 1000 * 60 * 3; // Consider cache fresh for 3 minutes
+
+// The URL for your Google Sheet, published as a CSV
 const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRzkojI6qgs3Nyxsv6lXbhVpyxxRi2B62TQolcAML3HpM891nm1WakftcTP6H4HQp6oL0EmG0UT-ZoU/pub?output=csv';
 
-// Helper function to parse CSV text into an array of objects
-function parseCsv(csvText) {
-  const lines = csvText.trim().split('\n');
-  if (lines.length < 2) return [];
-
-  const headers = lines.shift().split(',').map(h => h.trim().toLowerCase());
-  
-  return lines.map(line => {
-    const values = line.split(',');
-    const article = {};
-    headers.forEach((header, i) => {
-      // Handle cases where a value might contain a comma by joining the rest of the array
-      const value = (i === values.length - 1) ? values[i] : values.slice(i).join(',');
-      // Basic cleanup to remove potential quotes from CSV values
-      article[header] = values[i] ? values[i].replace(/"/g, '').trim() : '';
-    });
-    return article;
-  }).filter(a => a.url && a.title); // Ensure basic data exists
+// --- Caching Utilities ---
+function readCache() {
+  try {
+    if (fs.existsSync(CACHE_FILE)) {
+      return JSON.parse(fs.readFileSync(CACHE_FILE, "utf8"));
+    }
+  } catch {}
+  return null;
+}
+function writeCache(payload) {
+  try {
+    fs.writeFileSync(CACHE_FILE, JSON.stringify({ ts: Date.now(), payload }));
+  } catch {}
 }
 
+// --- Data Fetching and Processing ---
+// ✅ FIX: Replaced the simple CSV parser with a more robust one that handles commas in titles.
+function parseCsv(csvText) {
+    const lines = csvText.trim().split(/\r?\n/);
+    if (lines.length < 2) return [];
+
+    const headers = lines.shift().split(',').map(h => h.trim().toLowerCase());
+    
+    const regex = /(?:^|,)(\"(?:[^\"]+|\"\")*\"|[^,]*)/g;
+
+    return lines.map(line => {
+        let values = [];
+        let match;
+        while (match = regex.exec(line)) {
+            let value = match[1].replace(/^"|"$/g, '').replace(/""/g, '"');
+            values.push(value);
+        }
+        
+        const article = {};
+        headers.forEach((header, i) => {
+            article[header] = values[i] || '';
+        });
+        return article;
+    }).filter(a => a.url && a.title);
+}
+
+
+// --- Main Handler ---
 exports.handler = async function() {
   try {
+    // 1. Serve a fresh cache if it's new enough
+    const cached = readCache();
+    if (cached && (Date.now() - (cached.ts || 0) <= TTL_MS)) {
+      console.log("Serving fresh recommended links from cache.");
+      return { statusCode: 200, headers: HEADERS, body: JSON.stringify(cached.payload) };
+    }
+
+    // 2. Fetch live data
+    console.log("Fetching live recommended links from Google Sheet...");
     const response = await fetch(SHEET_CSV_URL);
     if (!response.ok) throw new Error(`Google Sheet fetch failed: ${response.status}`);
     
     const csvText = await response.text();
     const articles = parseCsv(csvText).reverse(); // .reverse() for FIFO
+    
+    const payload = { status: "ok", articles };
+    writeCache(payload);
 
-    return {
-      statusCode: 200,
-      headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-        "Cache-Control": "public, max-age=300" // Cache for 5 minutes
-      },
-      body: JSON.stringify({ status: "ok", articles }),
-    };
+    return { statusCode: 200, headers: HEADERS, body: JSON.stringify(payload) };
+
   } catch (e) {
-    return {
-      statusCode: 500,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-      body: JSON.stringify({ status: "error", message: e.message }),
-    };
+    console.warn(`Live recommended fetch failed: ${e.message}. Attempting to serve from stale cache.`);
+    // 3. Fallback to stale cache if live fetch fails
+    const cached = readCache();
+    if (cached?.payload) {
+      console.log("Serving stale recommended links from cache.");
+      return { statusCode: 200, headers: HEADERS, body: JSON.stringify(cached.payload) };
+    }
+    
+    console.error("Cache is empty. No recommended links to serve.");
+    return { statusCode: 500, headers: HEADERS, body: JSON.stringify({ status: "error", message: e.message }) };
   }
 };
