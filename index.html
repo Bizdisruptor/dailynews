@@ -53,6 +53,19 @@
   <div class="market" id="market"><div class="loading">Loading market data…</div></div>
 
   <div class="grid">
+    <div class="card" id="recommended-card">
+      <h2>Recommended Reading</h2>
+      <div class="list"><div class="loading">Loading…</div></div>
+    </div>
+    <div class="card" id="cerf-card">
+      <h2>The Cerf Report</h2>
+      <div class="section-link">
+        <a href="https://thecerfreport.substack.com/" target="_blank" rel="noopener noreferrer">
+          thecerfreport.substack.com →
+        </a>
+      </div>
+      <div class="list"><div class="loading">Loading…</div></div>
+    </div>
     <div class="card" id="front-card">
       <h2>Front Page</h2>
       <div class="list"><div class="loading">Loading…</div></div>
@@ -67,15 +80,6 @@
     </div>
     <div class="card" id="finance-card">
       <h2>Finance</h2>
-      <div class="list"><div class="loading">Loading…</div></div>
-    </div>
-    <div class="card" id="cerf-card">
-      <h2>The Cerf Report</h2>
-      <div class="section-link">
-        <a href="https://thecerfreport.substack.com/" target="_blank" rel="noopener noreferrer">
-          thecerfreport.substack.com →
-        </a>
-      </div>
       <div class="list"><div class="loading">Loading…</div></div>
     </div>
   </div>
@@ -178,6 +182,12 @@
       if(data.status !== "ok" || !Array.isArray(data.articles)) return null;
       return data.articles.map(a=>({ title:a.title||"Untitled", url:a.url, description:a.description||"" }));
     }
+    
+    async function fetchRecommended(){
+        const data = await fetchJSON(ABS("/.netlify/functions/get-links"));
+        if(data.status !== "ok") return null;
+        return data.articles || null;
+    }
 
     async function updateAll(){
       // Market
@@ -192,16 +202,17 @@
       // News
       try{
         const results = await Promise.all([
+          fetchRecommended().catch(err => (console.error("recommended", err), null)),
           ...sections.map(s => fetchNews(s.section).catch(err => (console.error(s.section, err), null))),
           fetchCerf().catch(err => (console.error("substack", err), null))
         ]);
-        sections.forEach((s, i) => renderNewsList($(`#${s.id} .list`), results[i]));
-        renderNewsList($("#cerf-card .list"), results[results.length-1]);
+        renderNewsList($("#recommended-card .list"), results[0]);
+        sections.forEach((s, i) => renderNewsList($(`#${s.id} .list`), results[i+1]));
+        renderNewsList($("#cerf-card .list"), results[sections.length+1]);
       }catch(e){
         console.error("News update error:", e);
       }
-      
-      // ✅ FIX: Added copyright notice to the footer.
+
       const year = new Date().getFullYear();
       $("#updatedAt").innerHTML = `Updated ${new Date().toLocaleString()} &bull; &copy; ${year} Disruptive Business Solution LLC`;
     }
