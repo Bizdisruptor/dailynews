@@ -3,11 +3,11 @@
 const fetch = require("node-fetch");
 
 exports.handler = async function(event) {
-  const { title, url, description, tag } = event.queryStringParameters;
-  const secret = event.headers['x-secret-key'];
+  // ✅ FIX: Read all parameters, including the secret, from the URL query string.
+  const { title, url, description, tag, secret } = event.queryStringParameters;
 
   // --- Security Check ---
-  // Compare the secret from the header with the one set in your Netlify environment.
+  // Compare the secret from the URL with the one set in your Netlify environment.
   if (secret !== process.env.SECRET_KEY) {
     return {
       statusCode: 401,
