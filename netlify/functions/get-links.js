@@ -1,6 +1,6 @@
 // netlify/functions/get-links.js
 // Reads curated article links from a public Google Sheet.
-const fetch = require("node-fetch");
+const fetch = require("node-fetch"); // ✅ FIX: Added the required fetch library.
 
 const SHEET_ID = '1ZcU1KL1cg_M3AEvVt-1lQ9wjFidpVO7Ur3Tt4Q-jo9I';
 const API_URL = `https://spreadsheets.google.com/feeds/cells/${SHEET_ID}/od6/public/values?alt=json`;
