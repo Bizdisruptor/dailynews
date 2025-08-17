@@ -1,35 +1,26 @@
 // netlify/functions/get-links.js
-// Reads curated article links from a public Google Sheet.
-const fetch = require("node-fetch"); // ✅ FIX: Added the required fetch library.
+// Reads curated article links from a Google Sheet published as a CSV.
+const fetch = require("node-fetch");
 
-const SHEET_ID = '1ZcU1KL1cg_M3AEvVt-1lQ9wjFidpVO7Ur3Tt4Q-jo9I';
-const API_URL = `https://spreadsheets.google.com/feeds/cells/${SHEET_ID}/od6/public/values?alt=json`;
+// IMPORTANT: This must be the URL from the "Publish to web" dialog
+// after you select "Comma-separated values (.csv)".
+const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRzkojI6qgs3Nyxsv6lXbhVpyxxRi2B62TQolcAML3HpM891nm1WakftcTP6H4HQp6oL0EmG0UT-ZoU/pub?output=csv';
 
-// Helper function to parse the strange format Google Sheets returns
-function parseSheet(data) {
-  const entries = data.feed.entry;
-  if (!entries || entries.length === 0) return [];
+// Helper function to parse CSV text into an array of objects
+function parseCsv(csvText) {
+  const lines = csvText.trim().split('\n');
+  if (lines.length < 2) return [];
 
-  const rows = [];
-  let currentRow = [];
-  let lastRow = '1';
-
-  for (const entry of entries) {
-    const cell = entry.gs$cell;
-    if (cell.row !== lastRow) {
-      rows.push(currentRow);
-      currentRow = [];
-      lastRow = cell.row;
-    }
-    currentRow.push(cell.$t);
-  }
-  rows.push(currentRow);
-
-  const headers = rows.shift().map(h => h.toLowerCase());
-  return rows.map(row => {
+  const headers = lines.shift().split(',').map(h => h.trim().toLowerCase());
+  
+  return lines.map(line => {
+    const values = line.split(',');
     const article = {};
     headers.forEach((header, i) => {
-      article[header] = row[i] || '';
+      // Handle cases where a value might contain a comma by joining the rest of the array
+      const value = (i === values.length - 1) ? values[i] : values.slice(i).join(',');
+      // Basic cleanup to remove potential quotes from CSV values
+      article[header] = values[i] ? values[i].replace(/"/g, '').trim() : '';
     });
     return article;
   }).filter(a => a.url && a.title); // Ensure basic data exists
@@ -37,10 +28,11 @@ function parseSheet(data) {
 
 exports.handler = async function() {
   try {
-    const response = await fetch(API_URL);
+    const response = await fetch(SHEET_CSV_URL);
     if (!response.ok) throw new Error(`Google Sheet fetch failed: ${response.status}`);
-    const data = await response.json();
-    const articles = parseSheet(data).reverse(); // .reverse() for FIFO
+    
+    const csvText = await response.text();
+    const articles = parseCsv(csvText).reverse(); // .reverse() for FIFO
 
     return {
       statusCode: 200,
