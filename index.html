@@ -29,10 +29,8 @@
     .mlist div { display:flex; justify-content:space-between; font-size:.88rem; padding:1px 0; align-items: baseline;}
     .mlist a { font-weight:600; color:inherit; text-decoration:none; }
     .mlist a:hover { text-decoration:underline; color:var(--blue); }
-    /* ✅ NEW: Styles for the ticker and price group */
     .ticker-price { display: flex; align-items: baseline; gap: 8px; }
     .mlist .price { font-weight: 400; color: var(--muted); font-size: 0.9em; }
-
 
     .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:18px; max-width:1400px; margin:0 auto}
     .card{background:var(--paper);border-radius:12px;box-shadow:0 2px 6px rgba(0,0,0,.08);padding:16px;overflow:hidden}
@@ -57,6 +55,10 @@
   <div class="market" id="market"><div class="loading">Loading market data…</div></div>
 
   <div class="grid">
+    <div class="card" id="recommended-card">
+      <h2>Recommended Reading</h2>
+      <div class="list"><div class="loading">Loading…</div></div>
+    </div>
     <div class="card" id="cerf-card">
       <h2>The Cerf Report</h2>
       <div class="section-link">
@@ -110,7 +112,6 @@
       </span>`;
     }
     
-    // ✅ UPDATED: Added the price next to the ticker.
     function listHTML(arr){
       return (arr||[]).map(q=>{
         const sign=(q.d??0)>=0?"+":""; const cls=(q.d??0)>=0?"positive":"negative";
@@ -187,6 +188,12 @@
       if(data.status !== "ok" || !Array.isArray(data.articles)) return null;
       return data.articles.map(a=>({ title:a.title||"Untitled", url:a.url, description:a.description||"" }));
     }
+    
+    async function fetchRecommended(){
+        const data = await fetchJSON(ABS("/.netlify/functions/get-links"));
+        if(data.status !== "ok") return null;
+        return data.articles || null;
+    }
 
     async function updateAll(){
       // Market
@@ -201,11 +208,14 @@
       // News
       try{
         const results = await Promise.all([
+          fetchRecommended().catch(err => (console.error("recommended", err), null)),
           ...sections.map(s => fetchNews(s.section).catch(err => (console.error(s.section, err), null))),
           fetchCerf().catch(err => (console.error("substack", err), null))
         ]);
-        sections.forEach((s, i) => renderNewsList($(`#${s.id} .list`), results[i]));
-        renderNewsList($("#cerf-card .list"), results[results.length-1]);
+        renderNewsList($("#recommended-card .list"), results[0]);
+        // Adjust indices for the news sections
+        sections.forEach((s, i) => renderNewsList($(`#${s.id} .list`), results[i+1]));
+        renderNewsList($("#cerf-card .list"), results[sections.length+1]);
       }catch(e){
         console.error("News update error:", e);
       }
