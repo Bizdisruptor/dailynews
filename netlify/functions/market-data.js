@@ -1,5 +1,6 @@
 // netlify/functions/market-data.js
-// Market data using Finnhub, CoinGecko, and Yahoo Finance for gold.
+// Market data using the most reliable free sources for each asset class.
+// Finnhub (for stocks/ETFs) and CoinGecko (for BTC). Caches to /tmp.
 const fs = require("fs");
 const https = require("https");
 
@@ -19,7 +20,7 @@ const INDICES = [
 
 const MACRO = [
   { t: "BTCUSD", name: "Bitcoin" },
-  { t: "GC=F",   name: "Gold (Spot)" }, // Using Yahoo Finance for Gold
+  { t: "GLD",    name: "Gold (GLD)" },
   { t: "IEF",    name: "US Treasuries 7-10Y" },
 ];
 
@@ -87,22 +88,6 @@ async function coingeckoBTC(){
   return { ticker:"BTCUSD", name:"Bitcoin", c:price, d: (price!=null&&pct!=null? price*(pct/100):null), dp:pct };
 }
 
-// ✅ FIX: Using Yahoo Finance for Gold
-async function yahooGold() {
-    const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=GC%3DF`;
-    const data = await httpsGet(url, "yahoo:gold");
-    const result = data?.quoteResponse?.result?.[0];
-    if (!result) throw new Error("Yahoo Gold fetch failed");
-    return {
-        ticker: "GC=F",
-        name: "Gold (Spot)",
-        c: toNum(result.regularMarketPrice),
-        d: toNum(result.regularMarketChange),
-        dp: toNum(result.regularMarketChangePercent),
-    };
-}
-
-
 /* ===== Handler ===== */
 exports.handler = async function() {
   try {
@@ -113,13 +98,12 @@ exports.handler = async function() {
 
     const allFinnhubSymbols = [
         ...INDICES.map(x => x.t),
-        ...MACRO.filter(x => x.t !== 'BTCUSD' && x.t !== 'GC=F').map(x => x.t), // IEF
+        ...MACRO.filter(x => x.t !== 'BTCUSD').map(x => x.t), // GLD, IEF
         ...Object.values(GROUPS).flat()
     ];
 
-    const [btc, gold, finnhubResults] = await Promise.all([
+    const [btc, finnhubResults] = await Promise.all([
       coingeckoBTC().catch(e => (console.error("BTC fetch failed:", e.message), null)),
-      yahooGold().catch(e => (console.error("Gold fetch failed:", e.message), null)),
       batchFinnhub(allFinnhubSymbols),
     ]);
     
@@ -130,8 +114,9 @@ exports.handler = async function() {
         return q ? { ...q, name: x.name } : null;
     }).filter(Boolean);
 
+    const gld = qMap.get("GLD");
     const ief = qMap.get("IEF");
-    const macro = [btc, gold, ief && { ...ief, name: "US Treasuries 7-10Y" }].filter(Boolean);
+    const macro = [btc, gld && { ...gld, name: "Gold (GLD)" }, ief && { ...ief, name: "US Treasuries 7-10Y" }].filter(Boolean);
 
     const ai     = topMovers(GROUPS.ai, qMap, 10);
     const crypto = topMovers(GROUPS.crypto, qMap, 10);
