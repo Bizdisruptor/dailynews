@@ -2,6 +2,14 @@
   publish = "."
   functions = "netlify/functions"
 
+# ---------- Redirect EVERYTHING on Netlify hosts to the apex ----------
+[[redirects]]
+  from = "/*"
+  to = "https://thecerfreport.com/:splat"
+  status = 301
+  force = true
+  conditions = { Host = ["cerfreportnews.netlify.app", "*--cerfreportnews.netlify.app"] }
+
 # ---------- Headers ----------
 [[headers]]
   for = "/*"
