@@ -3,3 +3,26 @@
 
 [functions]
   directory = "netlify/functions"
+[[redirects]]
+  from = "https://cerfreportnews.netlify.app/*"
+  to   = "https://thecerfreport.com/:splat"
+  status = 301
+  force = true
+
+[[redirects]]
+  from = "https://*--cerfreportnews.netlify.app/*"
+  to   = "https://thecerfreport.com/:splat"
+  status = 301
+  force = true
+
+[[redirects]]
+  from = "https://cerfreportnews.netlify.app"
+  to   = "https://thecerfreport.com"
+  status = 301
+  force = true
+
+[[redirects]]
+  from = "https://*--cerfreportnews.netlify.app"
+  to   = "https://thecerfreport.com"
+  status = 301
+  force = true
