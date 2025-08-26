@@ -1,28 +1,23 @@
-[build.environment]
-  NODE_VERSION = "20"
+[build]
+  publish = "."
+  functions = "netlify/functions"
 
-[functions]
-  directory = "netlify/functions"
+# --- Redirects ---
 [[redirects]]
   from = "https://cerfreportnews.netlify.app/*"
-  to   = "https://thecerfreport.com/:splat"
+  to = "https://thecerfreport.com/:splat"
   status = 301
   force = true
 
 [[redirects]]
   from = "https://*--cerfreportnews.netlify.app/*"
-  to   = "https://thecerfreport.com/:splat"
+  to = "https://thecerfreport.com/:splat"
   status = 301
   force = true
 
-[[redirects]]
-  from = "https://cerfreportnews.netlify.app"
-  to   = "https://thecerfreport.com"
-  status = 301
-  force = true
-
-[[redirects]]
-  from = "https://*--cerfreportnews.netlify.app"
-  to   = "https://thecerfreport.com"
-  status = 301
-  force = true
+# --- Headers ---
+[[headers]]
+  for = "/*"
+  [headers.values]
+  # Allow search engines to index
+  X-Robots-Tag = "all"
