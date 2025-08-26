@@ -1,130 +1,232 @@
-// netlify/functions/market-data.js
-// Market data via Yahoo Finance (no API key) + CoinGecko (BTC).
-// Uses https (no global fetch needed), caches to /tmp, and never hard-fails the shape.
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>The Cerf Report — Curated News</title>
+  <style>
+    :root { --blue:#0056b3; --ink:#1c1e21; --muted:#606770; --paper:#fff; --bg:#f0f2f5; --positive:#17823b; --negative:#b00020; }
+    * { box-sizing:border-box; }
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink);margin:0;padding:18px}
+    h1{text-align:center;color:var(--blue);margin:0 0 6px}
+    .subhead{text-align:center;color:var(--muted);margin:0 0 18px;font-size:.95rem}
 
-const fs = require("fs");
-const https = require("https");
-
-const HEADERS = { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" };
-const CACHE_FILE = "/tmp/market-cache.json";
-const TTL_MS = 1000 * 60 * 3; // 3 minutes
-const REQ_TIMEOUT = 8000;
-
-/* ===== Symbols ===== */
-const INDICES = [
-  { t: "^DJI",  name: "Dow Jones" },
-  { t: "^GSPC", name: "S&P 500" },
-  { t: "^IXIC", name: "Nasdaq" },
-];
-
-const MACRO = [
-  { t: "BTCUSD",   name: "Bitcoin" },
-  { t: "GC=F",     name: "Gold (Spot)" },
-  { t: "IEF",      name: "US Treasuries 7–10Y (IEF)" },
-];
-
-const GROUPS = {
-  ai:     ["NVDA","MSFT","GOOGL","AMZN","META","TSLA","AVGO","AMD","SMCI","PLTR"],
-  crypto: ["COIN","MSTR","MARA","RIOT","CLSK"],
-  energy: ["XOM","CVX","SLB","OXY","COP"],
-};
-
-/* ===== Utils ===== */
-const toNum = v => (Number.isFinite(+v) ? +v : null);
-const readCache = () => { try { return fs.existsSync(CACHE_FILE) ? JSON.parse(fs.readFileSync(CACHE_FILE,"utf8")) : null; } catch { return null; } };
-const writeCache = payload => { try { fs.writeFileSync(CACHE_FILE, JSON.stringify({ ts: Date.now(), payload })); } catch {} };
-const toMap = arr => { const m=new Map(); (arr||[]).forEach(x=>x?.ticker&&m.set(x.ticker,x)); return m; };
-function topMovers(universe, map, n=10){
-  const rows=[]; for(const t of universe){ const q=map.get(t); if(q && Number.isFinite(q.dp)) rows.push({ticker:t,c:q.c,d:q.d,dp:q.dp}); }
-  rows.sort((a,b)=>Math.abs(b.dp)-Math.abs(a.dp)); return rows.slice(0,n);
-}
-function httpsGet(url, tag="request"){
-  return new Promise((resolve,reject)=>{
-    const u=new URL(url);
-    const req=https.request({
-      method:"GET", hostname:u.hostname, path:u.pathname+(u.search||""),
-      headers:{ "Accept":"application/json", "User-Agent":"cerfreport/1.0" }, timeout: REQ_TIMEOUT
-    },res=>{
-      const chunks=[]; res.on("data",d=>chunks.push(d));
-      res.on("end",()=>{
-        const body=Buffer.concat(chunks).toString("utf8");
-        if(res.statusCode<200||res.statusCode>=300) return reject(new Error(`${tag} HTTP ${res.statusCode}`));
-        try { resolve(JSON.parse(body)); } catch(e){ reject(new Error(`${tag} JSON parse error: ${e.message}`)); }
-      });
-    });
-    req.on("error",e=>reject(new Error(`${tag} ${e.message}`)));
-    req.on("timeout",()=>req.destroy(new Error(`${tag} timeout ${REQ_TIMEOUT}ms`)));
-    req.end();
-  });
-}
-
-/* ===== Providers (keyless) ===== */
-async function yahooBatch(symbols) {
-  if (!symbols.length) return [];
-  const list = symbols.map(s => encodeURIComponent(s)).join(",");
-  const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${list}`;
-  const data = await httpsGet(url, "yahoo:batch");
-  const results = data?.quoteResponse?.result || [];
-  return results.map(r => ({
-    ticker: r.symbol,
-    name: r.shortName || r.longName || r.symbol,
-    c: toNum(r.regularMarketPrice),
-    d: toNum(r.regularMarketChange),
-    dp: toNum(r.regularMarketChangePercent)
-  }));
-}
-
-async function coingeckoBTC() {
-  const url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_change=true";
-  const data = await httpsGet(url, "coingecko:btc");
-  const price = toNum(data?.bitcoin?.usd);
-  const pct = toNum(data?.bitcoin?.usd_24h_change);
-  return { ticker: "BTC-USD", name: "Bitcoin", c: price, d: (price != null && pct != null ? price * (pct / 100) : null), dp: pct };
-}
-
-/* ===== Handler ===== */
-exports.handler = async function() {
-  try {
-    const cached = readCache();
-    if (cached && Date.now() - (cached.ts || 0) <= TTL_MS) {
-      return { statusCode: 200, headers: HEADERS, body: JSON.stringify(cached.payload) };
+    .market {
+      background:var(--paper); border-radius:12px; box-shadow:0 2px 6px rgba(0,0,0,.08);
+      padding:12px 14px; margin:0 auto 18px; max-width:1400px;
     }
+    .market .row { display:flex; flex-wrap:wrap; gap:16px 24px; align-items:center; justify-content: center;}
+    .chip { display:flex; gap:6px; align-items:center; font-size:.92rem; }
+    .chip a { color:inherit; text-decoration:none; font-weight:600; }
+    .chip a:hover { text-decoration:underline; color:var(--blue); }
+    .price { font-weight:600; }
+    .chg.positive{ color:var(--positive); }
+    .chg.negative{ color:var(--negative); }
+    .divider { height:10px }
 
-    const allYahooSymbols = [
-      ...INDICES.map(x => x.t),
-      ...MACRO.filter(x => x.t !== 'BTCUSD').map(x => x.t),
-      ...Object.values(GROUPS).flat()
+    .mover-grid { display:grid; gap:10px 14px; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); margin-top:8px; }
+    .mgroup h3 { margin:0 0 6px; font-size:.8rem; color:var(--blue); letter-spacing:.5px; text-transform:uppercase; }
+    .mlist div { display:flex; justify-content:space-between; font-size:.88rem; padding:1px 0; align-items: baseline;}
+    .mlist a { font-weight:600; color:inherit; text-decoration:none; }
+    .mlist a:hover { text-decoration:underline; color:var(--blue); }
+    .ticker-price { display: flex; align-items: baseline; gap: 8px; }
+    .mlist .price { font-weight: 400; color: var(--muted); font-size: 0.9em; }
+
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:18px; max-width:1400px; margin:0 auto}
+    .card{background:var(--paper);border-radius:12px;box-shadow:0 2px 6px rgba(0,0,0,.08);padding:16px;overflow:hidden}
+    .card h2{margin:0 0 8px;border-bottom:2px solid var(--blue);padding-bottom:8px;font-size:1.1rem}
+    .section-link{margin:-4px 0 8px}
+    .section-link a{font-size:.9rem;text-decoration:none}
+    .section-link a:hover{text-decoration:underline}
+    .list{max-height:520px;overflow-y:auto;padding-right:8px;min-height:100px}
+    .item{margin:0 0 12px;border-bottom:1px solid #eee;padding:0 0 10px}
+    .item:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0}
+    .item a{color:#0d6efd;text-decoration:none;font-weight:600}
+    .item a:hover{text-decoration:underline}
+    .item p{margin:6px 0 0;color:var(--muted);font-size:.92rem;line-height:1.35}
+    .loading{text-align:center;padding:14px;color:var(--muted);line-height:1.4;}
+    .footer{margin:16px auto 0;text-align:center;color:#8a8f98;font-size:.85rem;max-width:1400px}
+  </style>
+</head>
+<body>
+  <h1>The Cerf Report — Curated News</h1>
+  <div class="subhead">News minus the junk. Tech, finance, and interesting stuff.</div>
+
+  <div class="market" id="market"><div class="loading">Loading market data…</div></div>
+
+  <div class="grid">
+    <div class="card" id="recommended-card">
+      <h2>Recommended Reading</h2>
+      <div class="list"><div class="loading">Loading…</div></div>
+    </div>
+    <div class="card" id="cerf-card">
+      <h2>The Cerf Report</h2>
+      <div class="section-link">
+        <a href="https://thecerfreport.substack.com/" target="_blank" rel="noopener noreferrer">
+          thecerfreport.substack.com →
+        </a>
+      </div>
+      <div class="list"><div class="loading">Loading…</div></div>
+    </div>
+    <div class="card" id="front-card">
+      <h2>Front Page</h2>
+      <div class="list"><div class="loading">Loading…</div></div>
+    </div>
+    <div class="card" id="tech-card">
+      <h2>Technology</h2>
+      <div class="list"><div class="loading">Loading…</div></div>
+    </div>
+    <div class="card" id="world-card">
+      <h2>World News</h2>
+      <div class="list"><div class="loading">Loading…</div></div>
+    </div>
+    <div class="card" id="finance-card">
+      <h2>Finance</h2>
+      <div class="list"><div class="loading">Loading…</div></div>
+    </div>
+  </div>
+
+  <div class="footer" id="updatedAt"></div>
+
+  <script>
+    const ABS = (path) => new URL(path, location.origin).toString();
+    const FINANCE = (t) => `https://finance.yahoo.com/quote/${encodeURIComponent(t)}`;
+    const $ = (sel, root=document) => root.querySelector(sel);
+
+    const sections = [
+      { id: "front-card",   section: "frontpage" },
+      { id: "tech-card",    section: "tech" },
+      { id: "world-card",   section: "world" },
+      { id: "finance-card", section: "finance" },
     ];
 
-    const [btc, yahooResults] = await Promise.all([
-      coingeckoBTC().catch(e => { console.error("BTC fetch failed:", e.message); return null; }),
-      yahooBatch(allYahooSymbols),
-    ]);
+    function fmt(n, d=2){ if(n==null || isNaN(n)) return "—"; return (+n).toFixed(d); }
+    function chipHTML(q){
+      if (!q) return '';
+      const sign = (q.d ?? 0) >= 0 ? "+" : "";
+      const cls  = (q.d ?? 0) >= 0 ? "positive" : "negative";
+      return `<span class="chip">
+        <a href="${FINANCE(q.ticker)}" target="_blank" rel="noopener">${q.name}</a>
+        <span class="price">${fmt(q.c)}</span>
+        <span class="chg ${cls}">${sign}${fmt(q.d)} (${sign}${fmt(q.dp)}%)</span>
+      </span>`;
+    }
     
-    const qMap = toMap(yahooResults);
+    function listHTML(arr){
+      return (arr||[]).map(q=>{
+        const sign=(q.d??0)>=0?"+":""; const cls=(q.d??0)>=0?"positive":"negative";
+        return `<div>
+          <span class="ticker-price">
+            <a href="${FINANCE(q.ticker)}" target="_blank" rel="noopener">${q.ticker}</a>
+            <span class="price">${fmt(q.c)}</span>
+          </span>
+          <span class="chg ${cls}">${sign}${fmt(q.d)} (${sign}${fmt(q.dp)}%)</span>
+        </div>`;
+      }).join('');
+    }
 
-    const indices = INDICES.map(x => {
-        const q = qMap.get(x.t);
-        return q ? { ...q, name: x.name } : null;
-    }).filter(Boolean);
+    function renderMarket(data){
+      const m = $('#market');
+      if(!data){ m.innerHTML = '<div class="loading">Could not load market data.</div>'; return; }
+      const macro   = (data.macro||[]).map(chipHTML).join('<span class="divider"></span>');
+      const indices = (data.indices||[]).map(chipHTML).join('<span class="divider"></span>');
+      const ai      = listHTML(data.ai);
+      const crypto  = listHTML(data.crypto);
+      const energy  = listHTML(data.energy);
+      m.innerHTML = `
+        <div class="row">${macro}</div>
+        <div class="divider"></div>
+        <div class="row">${indices}</div>
+        <div class="mover-grid">
+          <div class="mgroup"><h3>AI</h3><div class="mlist">${ai}</div></div>
+          <div class="mgroup"><h3>CRYPTO</h3><div class="mlist">${crypto}</div></div>
+          <div class="mgroup"><h3>ENERGY</h3><div class="mlist">${energy}</div></div>
+        </div>`;
+    }
 
-    const gold = qMap.get("GC=F");
-    const ief = qMap.get("IEF");
-    const macro = [btc, gold && { ...gold, name: "Gold (Spot)" }, ief && { ...ief, name: "US Treasuries 7-10Y" }].filter(Boolean);
+    function renderNewsList(listEl, articles){
+      if(!articles || !articles.length){
+        if (listEl.innerHTML.includes('loading')) {
+            listEl.innerHTML = '<div class="loading">Could not load news at this time.</div>';
+        }
+        return;
+      }
+      listEl.innerHTML = "";
+      for(const a of articles){
+        if(!a || !a.title) continue;
+        const div = document.createElement("div");
+        div.className = "item";
+        div.innerHTML = `<a href="${a.url}" target="_blank" rel="noopener noreferrer">${a.title}</a>
+                         <p>${a.description ? a.description : ""}</p>`;
+        listEl.appendChild(div);
+      }
+    }
 
-    const ai     = topMovers(GROUPS.ai, qMap, 10);
-    const crypto = topMovers(GROUPS.crypto, qMap, 10);
-    const energy = topMovers(GROUPS.energy, qMap, 10);
+    async function fetchJSON(url){
+      try{
+        const r = await fetch(url, { redirect: "follow" });
+        if(!r.ok) throw new Error(`HTTP ${r.status}`);
+        return await r.json();
+      }catch(e){
+        console.error("Fetch failed:", url, e);
+        throw e;
+      }
+    }
 
-    const payload = { status:"ok", data:{ macro, indices, ai, crypto, energy } };
+    async function fetchMarket(){
+      const data = await fetchJSON(ABS("/.netlify/functions/market-data"));
+      if(data.status !== "ok" || !data.data) throw new Error("Bad market payload");
+      return data.data;
+    }
+    async function fetchNews(section){
+      const data = await fetchJSON(ABS(`/.netlify/functions/news?section=${encodeURIComponent(section)}`));
+      if(data.status !== "ok") return null;
+      return data.articles || null;
+    }
+    async function fetchCerf(){
+      const data = await fetchJSON(ABS("/.netlify/functions/substack?mode=archive"));
+      if(data.status !== "ok" || !Array.isArray(data.articles)) return null;
+      return data.articles.map(a=>({ title:a.title||"Untitled", url:a.url, description:a.description||"" }));
+    }
     
-    writeCache(payload);
-    return { statusCode: 200, headers: HEADERS, body: JSON.stringify(payload) };
-  } catch (e) {
-    console.error("market-data fatal:", e.message);
-    const cached = readCache();
-    if (cached?.payload) return { statusCode: 200, headers: HEADERS, body: JSON.stringify(cached.payload) };
-    const payload = { status:"ok", data:{ macro:[], indices:[], ai:[], crypto:[], energy:[] }, note:`fatal:${e.message}` };
-    return { statusCode: 200, headers: HEADERS, body: JSON.stringify(payload) };
-  }
-};
+    async function fetchRecommended(){
+        const data = await fetchJSON(ABS("/.netlify/functions/get-links"));
+        if(data.status !== "ok") return null;
+        return data.articles || null;
+    }
+
+    async function updateAll(){
+      // Market
+      try{
+        const market = await fetchMarket();
+        renderMarket(market);
+      }catch(e){
+        console.error("Market error:", e);
+        renderMarket(null);
+      }
+
+      // News
+      try{
+        const results = await Promise.all([
+          fetchRecommended().catch(err => (console.error("recommended", err), null)),
+          ...sections.map(s => fetchNews(s.section).catch(err => (console.error(s.section, err), null))),
+          fetchCerf().catch(err => (console.error("substack", err), null))
+        ]);
+        renderNewsList($("#recommended-card .list"), results[0]);
+        sections.forEach((s, i) => renderNewsList($(`#${s.id} .list`), results[i+1]));
+        renderNewsList($("#cerf-card .list"), results[sections.length+1]);
+      }catch(e){
+        console.error("News update error:", e);
+      }
+
+      const year = new Date().getFullYear();
+      $("#updatedAt").innerHTML = `Updated ${new Date().toLocaleString()} &bull; &copy; ${year} Disruptive Business Solution LLC`;
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+      updateAll();
+      setInterval(updateAll, 5 * 60 * 1000);
+    });
+  </script>
+</body>
+</html>
