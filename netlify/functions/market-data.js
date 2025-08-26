@@ -1,8 +1,9 @@
 // netlify/functions/market-data.js
 // Market data via Yahoo Finance (no API key) + CoinGecko (BTC).
-// Caches to /tmp, has timeouts, and never hard-fails the response shape.
+// Uses https (no global fetch needed), caches to /tmp, and never hard-fails the shape.
 
 const fs = require("fs");
+const https = require("https");
 
 const HEADERS = { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" };
 const CACHE_FILE = "/tmp/market-cache.json";
@@ -13,16 +14,15 @@ const REQ_TIMEOUT = 8000;
 const INDICES = [
   { t: "^DJI",  name: "Dow Jones" },
   { t: "^GSPC", name: "S&P 500" },
-  { t: "^IXIC", name: "Nasdaq" },   // swap to ^NDX for Nasdaq-100 if you prefer
+  { t: "^IXIC", name: "Nasdaq" }, // switch to ^NDX for Nasdaq-100 if you prefer
 ];
 
 const MACRO = [
-  { t: "BTCUSD",   name: "Bitcoin" },       // CoinGecko
-  { t: "XAUUSD=X", name: "Gold (Spot)" },   // Yahoo
+  { t: "BTCUSD",   name: "Bitcoin" },         // CoinGecko
+  { t: "XAUUSD=X", name: "Gold (Spot)" },     // Yahoo
   { t: "IEF",      name: "US Treasuries 7–10Y (IEF)" }, // Yahoo (ETF proxy)
 ];
 
-// Movers universes
 const GROUPS = {
   ai:     ["NVDA","MSFT","GOOGL","AMZN","META","TSLA","AVGO","AMD","SMCI","PLTR","ASML","MU","TSM"],
   crypto: ["COIN","MSTR","MARA","RIOT","CLSK","HUT","BITF","IREN","CIFR","WULF"],
@@ -31,18 +31,36 @@ const GROUPS = {
 
 /* ===== Utils ===== */
 function toNum(v){ const n = Number(v); return Number.isFinite(n) ? n : null; }
-function withTimeout(promise, ms, tag) {
+
+function httpsGet(url, headers = {}, tag = "request") {
   return new Promise((resolve, reject) => {
-    const id = setTimeout(() => reject(new Error(`${tag || "request"} timeout ${ms}ms`)), ms);
-    promise.then(v => { clearTimeout(id); resolve(v); })
-           .catch(e => { clearTimeout(id); reject(e); });
+    const u = new URL(url);
+    const opts = {
+      method: "GET",
+      hostname: u.hostname,
+      path: u.pathname + (u.search || ""),
+      headers: { "Accept": "application/json", "User-Agent": "cerfreport/1.0", ...headers },
+      timeout: REQ_TIMEOUT
+    };
+    const req = https.request(opts, (res) => {
+      const { statusCode } = res;
+      const chunks = [];
+      res.on("data", (d) => chunks.push(d));
+      res.on("end", () => {
+        const body = Buffer.concat(chunks).toString("utf8");
+        if (statusCode < 200 || statusCode >= 300) {
+          return reject(new Error(`${tag} HTTP ${statusCode}`));
+        }
+        try { resolve(JSON.parse(body)); }
+        catch (e) { reject(new Error(`${tag} JSON parse error: ${e.message}`)); }
+      });
+    });
+    req.on("error", (e) => reject(new Error(`${tag} ${e.message}`)));
+    req.on("timeout", () => { req.destroy(new Error(`${tag} timeout ${REQ_TIMEOUT}ms`)); });
+    req.end();
   });
 }
-async function fetchJson(url, headers, tag="request") {
-  const r = await withTimeout(fetch(url, { headers, redirect:"follow" }), REQ_TIMEOUT, tag);
-  if (!r.ok) throw new Error(`${tag} HTTP ${r.status}`);
-  return r.json();
-}
+
 function readCache() {
   try {
     if (fs.existsSync(CACHE_FILE)) {
@@ -55,6 +73,7 @@ function readCache() {
 function writeCache(payload) {
   try { fs.writeFileSync(CACHE_FILE, JSON.stringify({ ts: Date.now(), payload })); } catch {}
 }
+
 function toMap(arr) { const m = new Map(); (arr||[]).forEach(x => x?.ticker && m.set(x.ticker, x)); return m; }
 function topMoversFromUniverse(universe, map, count=10) {
   const rows = [];
@@ -67,12 +86,11 @@ function topMoversFromUniverse(universe, map, count=10) {
 }
 
 /* ===== Providers (keyless) ===== */
-// Yahoo Finance batch quotes
 async function yahooBatch(symbols) {
   if (!symbols.length) return [];
   const list = symbols.map(s => encodeURIComponent(s)).join(",");
   const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${list}`;
-  const data = await fetchJson(url, { "Accept": "application/json", "User-Agent": "cerfreport/1.0" }, "yahoo:batch");
+  const data = await httpsGet(url, {}, "yahoo:batch");
   const results = data?.quoteResponse?.result || [];
   return results.map(r => ({
     ticker: r.symbol,
@@ -83,13 +101,9 @@ async function yahooBatch(symbols) {
   }));
 }
 
-// CoinGecko BTC
 async function coingeckoBTC() {
-  const data = await fetchJson(
-    "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_change=true",
-    { "Accept": "application/json" },
-    "coingecko:btc"
-  );
+  const url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_change=true";
+  const data = await httpsGet(url, {}, "coingecko:btc");
   const price = toNum(data?.bitcoin?.usd);
   const changePct = toNum(data?.bitcoin?.usd_24h_change);
   const changeAbs = price != null && changePct != null ? price * (changePct / 100) : null;
@@ -119,15 +133,15 @@ exports.handler = async function() {
 
     const yMap = toMap(yAll);
 
-    // Build indices
+    // Indices
     const indices = INDICES
       .map(x => {
         const q = yMap.get(x.t);
         return q ? { ...q, name: x.name } : null;
-      })
+        })
       .filter(Boolean);
 
-    // Build macro: BTC + Gold spot + IEF
+    // Macro: BTC + Gold spot + IEF
     const gold = yMap.get("XAUUSD=X");
     const ief  = yMap.get("IEF");
     const macro = [btc, gold && { ...gold, name: "Gold (Spot)" }, ief && { ...ief, name: "US Treasuries 7–10Y (IEF)" }]
@@ -140,21 +154,16 @@ exports.handler = async function() {
     const crypto = topMoversFromUniverse(GROUPS.crypto, qMap, 10);
     const energy = topMoversFromUniverse(GROUPS.energy, qMap, 10);
 
-    const payload = {
-      status: "ok",
-      data: { macro, indices, ai, crypto, energy, movers: { ai, crypto, energy } }
-    };
-
+    const payload = { status: "ok", data: { macro, indices, ai, crypto, energy, movers: { ai, crypto, energy } } };
     writeCache(payload);
     return { statusCode: 200, headers: HEADERS, body: JSON.stringify(payload) };
   } catch (e) {
     console.error("market-data error:", e.message);
-
-    // Soft fallback so UI still renders something
     const cached = readCache();
     if (cached?.payload) {
       return { statusCode: 200, headers: HEADERS, body: JSON.stringify(cached.payload) };
     }
+    // Soft fallback so UI still renders something
     const payload = { status: "ok", data: { macro: [], indices: [], ai: [], crypto: [], energy: [], movers: { ai:[], crypto:[], energy:[] } }, note: e.message };
     return { statusCode: 200, headers: HEADERS, body: JSON.stringify(payload) };
   }
