@@ -1,6 +1,8 @@
 // netlify/functions/market-data.js
-// Market data using the most reliable free sources for each asset class.
-// Finnhub (for stocks/ETFs) and CoinGecko (for BTC). Caches to /tmp.
+// Market data using a hybrid approach for maximum reliability.
+// - Yahoo Finance for real indices and spot gold.
+// - Finnhub for stock/ETF movers.
+// - CoinGecko for Bitcoin.
 const fs = require("fs");
 const https = require("https");
 
@@ -12,18 +14,20 @@ const REQ_TIMEOUT = 8000;
 const FINNHUB_KEY = process.env.FINNHUB_API_KEY || "";
 
 /* ===== Symbols ===== */
-const INDICES = [
-  { t: "DIA",  name: "Dow Jones" },
-  { t: "SPY",  name: "S&P 500" },
-  { t: "QQQ",  name: "Nasdaq 100" },
-];
+// Use real index and spot gold symbols for Yahoo
+const YAHOO_SYMBOLS = {
+  indices: [
+    { t: "^DJI", name: "Dow Jones" },
+    { t: "^GSPC", name: "S&P 500" },
+    { t: "^IXIC", name: "Nasdaq" },
+  ],
+  macro: [
+    { t: "GC=F", name: "Gold (Spot)" },
+    { t: "IEF",  name: "US Treasuries 7-10Y" },
+  ]
+};
 
-const MACRO = [
-  { t: "BTCUSD", name: "Bitcoin" },
-  { t: "GLD",    name: "Gold (GLD)" },
-  { t: "IEF",    name: "US Treasuries 7-10Y" },
-];
-
+// Movers universes will be fetched from Finnhub
 const GROUPS = {
   ai:     ["NVDA","MSFT","GOOGL","AMZN","META","TSLA","AVGO","AMD","SMCI","PLTR"],
   crypto: ["COIN","MSTR","MARA","RIOT","CLSK"],
@@ -60,6 +64,21 @@ function httpsGet(url, tag="request"){
 }
 
 /* ===== Providers ===== */
+async function yahooBatch(symbols) {
+  if (!symbols.length) return [];
+  const list = symbols.map(s => encodeURIComponent(s)).join(",");
+  const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${list}`;
+  const data = await httpsGet(url, "yahoo:batch");
+  const results = data?.quoteResponse?.result || [];
+  return results.map(r => ({
+    ticker: r.symbol,
+    name: r.shortName || r.longName || r.symbol,
+    c: toNum(r.regularMarketPrice),
+    d: toNum(r.regularMarketChange),
+    dp: toNum(r.regularMarketChangePercent)
+  }));
+}
+
 async function finnhubQuote(symbol) {
   if (!FINNHUB_KEY) throw new Error("Missing FINNHUB_API_KEY");
   const url = `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(symbol)}&token=${FINNHUB_KEY}`;
@@ -85,7 +104,7 @@ async function coingeckoBTC(){
   const data=await httpsGet(url,"coingecko:btc");
   const price=toNum(data?.bitcoin?.usd);
   const pct=toNum(data?.bitcoin?.usd_24h_change);
-  return { ticker:"BTCUSD", name:"Bitcoin", c:price, d: (price!=null&&pct!=null? price*(pct/100):null), dp:pct };
+  return { ticker:"BTC-USD", name:"Bitcoin", c:price, d: (price!=null&&pct!=null? price*(pct/100):null), dp:pct };
 }
 
 /* ===== Handler ===== */
@@ -96,31 +115,31 @@ exports.handler = async function() {
       return { statusCode: 200, headers: HEADERS, body: JSON.stringify(cached.payload) };
     }
 
-    const allFinnhubSymbols = [
-        ...INDICES.map(x => x.t),
-        ...MACRO.filter(x => x.t !== 'BTCUSD').map(x => x.t), // GLD, IEF
-        ...Object.values(GROUPS).flat()
-    ];
-
-    const [btc, finnhubResults] = await Promise.all([
-      coingeckoBTC().catch(e => (console.error("BTC fetch failed:", e.message), null)),
-      batchFinnhub(allFinnhubSymbols),
+    // Fetch from all sources in parallel
+    const [btc, yahooResults, finnhubResults] = await Promise.all([
+      coingeckoBTC().catch(e => { console.error("BTC fetch failed:", e.message); return null; }),
+      yahooBatch([...YAHOO_SYMBOLS.indices.map(s => s.t), ...YAHOO_SYMBOLS.macro.map(s => s.t)]),
+      batchFinnhub(Object.values(GROUPS).flat()),
     ]);
     
-    const qMap = toMap(finnhubResults);
+    const yahooMap = toMap(yahooResults);
+    const finnhubMap = toMap(finnhubResults);
 
-    const indices = INDICES.map(x => {
-        const q = qMap.get(x.t);
+    // Build indices from Yahoo data
+    const indices = YAHOO_SYMBOLS.indices.map(x => {
+        const q = yahooMap.get(x.t);
         return q ? { ...q, name: x.name } : null;
     }).filter(Boolean);
 
-    const gld = qMap.get("GLD");
-    const ief = qMap.get("IEF");
-    const macro = [btc, gld && { ...gld, name: "Gold (GLD)" }, ief && { ...ief, name: "US Treasuries 7-10Y" }].filter(Boolean);
+    // Build macro from Yahoo and CoinGecko
+    const gold = yahooMap.get("GC=F");
+    const ief = yahooMap.get("IEF");
+    const macro = [btc, gold && { ...gold, name: "Gold (Spot)" }, ief && { ...ief, name: "US Treasuries 7-10Y" }].filter(Boolean);
 
-    const ai     = topMovers(GROUPS.ai, qMap, 10);
-    const crypto = topMovers(GROUPS.crypto, qMap, 10);
-    const energy = topMovers(GROUPS.energy, qMap, 10);
+    // Build movers from Finnhub data
+    const ai     = topMovers(GROUPS.ai, finnhubMap, 10);
+    const crypto = topMovers(GROUPS.crypto, finnhubMap, 10);
+    const energy = topMovers(GROUPS.energy, finnhubMap, 10);
 
     const payload = { status:"ok", data:{ macro, indices, ai, crypto, energy } };
     
