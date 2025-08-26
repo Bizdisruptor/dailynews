@@ -1,4 +1,6 @@
 // netlify/functions/market-data.js
+// Market data using the most reliable free sources for each asset class.
+// Finnhub (for stocks/ETFs) and CoinGecko (for BTC). Caches to /tmp.
 const fs = require("fs");
 const https = require("https");
 
@@ -8,13 +10,18 @@ const TTL_MS = 1000 * 60 * 3; // 3 minutes
 const REQ_TIMEOUT = 8000;
 
 const FINNHUB_KEY = process.env.FINNHUB_API_KEY || "";
-const POLYGON_KEY = process.env.POLYGON_API_KEY || "";
 
 /* ===== Symbols ===== */
 const INDICES = [
-  { t: "DIA",  name: "NYSE" },
+  { t: "DIA",  name: "Dow Jones" },
   { t: "SPY",  name: "S&P 500" },
-  { t: "QQQ",  name: "Nasdaq" },
+  { t: "QQQ",  name: "Nasdaq 100" },
+];
+
+const MACRO = [
+  { t: "BTCUSD", name: "Bitcoin" },
+  { t: "GLD",    name: "Gold (GLD)" },
+  { t: "IEF",    name: "US Treasuries 7-10Y" },
 ];
 
 const GROUPS = {
@@ -28,25 +35,10 @@ const toNum = v => (Number.isFinite(+v) ? +v : null);
 const readCache = () => { try { return fs.existsSync(CACHE_FILE) ? JSON.parse(fs.readFileSync(CACHE_FILE,"utf8")) : null; } catch { return null; } };
 const writeCache = payload => { try { fs.writeFileSync(CACHE_FILE, JSON.stringify({ ts: Date.now(), payload })); } catch {} };
 const toMap = arr => { const m=new Map(); (arr||[]).forEach(x=>x?.ticker&&m.set(x.ticker,x)); return m; };
-
-function getTopMover(universe, map) {
-  let topMover = null;
-  let maxAbsChange = 0;
-  
-  for(const ticker of universe) {
-    const quote = map.get(ticker);
-    if(quote && Number.isFinite(quote.dp)) {
-      const absChange = Math.abs(quote.dp);
-      if(absChange > maxAbsChange) {
-        maxAbsChange = absChange;
-        topMover = {ticker, c: quote.c, d: quote.d, dp: quote.dp};
-      }
-    }
-  }
-  
-  return topMover ? [topMover] : [];
+function topMovers(universe, map, n=10){
+  const rows=[]; for(const t of universe){ const q=map.get(t); if(q && Number.isFinite(q.dp)) rows.push({ticker:t,c:q.c,d:q.d,dp:q.dp}); }
+  rows.sort((a,b)=>Math.abs(b.dp)-Math.abs(a.dp)); return rows.slice(0,n);
 }
-
 function httpsGet(url, tag="request"){
   return new Promise((resolve,reject)=>{
     const u=new URL(url);
@@ -96,71 +88,6 @@ async function coingeckoBTC(){
   return { ticker:"BTCUSD", name:"Bitcoin", c:price, d: (price!=null&&pct!=null? price*(pct/100):null), dp:pct };
 }
 
-// Get gold spot price from Polygon
-async function polygonGold() {
-  if (!POLYGON_KEY) throw new Error("Missing POLYGON_API_KEY");
-  
-  try {
-    const today = new Date().toISOString().split('T')[0];
-    const yesterday = new Date(Date.now() - 24*60*60*1000).toISOString().split('T')[0];
-    
-    // Polygon forex endpoint for XAU/USD (gold)
-    const url = `https://api.polygon.io/v1/open-close/C:XAUUSD/${yesterday}?adjusted=true&apikey=${POLYGON_KEY}`;
-    const data = await httpsGet(url, "polygon:gold");
-    
-    if (data && data.close && data.open) {
-      const price = toNum(data.close);
-      const change = toNum(data.close - data.open);
-      const changePercent = toNum((change / data.open) * 100);
-      
-      return { 
-        ticker: "XAUUSD", 
-        name: "Gold", 
-        c: price, 
-        d: change, 
-        dp: changePercent 
-      };
-    }
-    return null;
-  } catch (e) {
-    console.warn("Polygon gold failed:", e.message);
-    return null;
-  }
-}
-
-// Get 10-year Treasury yield from Polygon
-async function polygonTreasury() {
-  if (!POLYGON_KEY) throw new Error("Missing POLYGON_API_KEY");
-  
-  try {
-    const today = new Date().toISOString().split('T')[0];
-    const yesterday = new Date(Date.now() - 24*60*60*1000).toISOString().split('T')[0];
-    
-    // Polygon has Treasury data under different symbols
-    // Try DGS10 (10-Year Treasury Constant Maturity Rate)
-    const url = `https://api.polygon.io/v1/open-close/I:DGS10/${yesterday}?adjusted=true&apikey=${POLYGON_KEY}`;
-    const data = await httpsGet(url, "polygon:treasury");
-    
-    if (data && data.close && data.open) {
-      const yield_ = toNum(data.close);
-      const change = toNum(data.close - data.open);
-      const changePercent = toNum((change / data.open) * 100);
-      
-      return { 
-        ticker: "DGS10", 
-        name: "10-Yr Bond", 
-        c: yield_, 
-        d: change, 
-        dp: changePercent 
-      };
-    }
-    return null;
-  } catch (e) {
-    console.warn("Polygon treasury failed:", e.message);
-    return null;
-  }
-}
-
 /* ===== Handler ===== */
 exports.handler = async function() {
   try {
@@ -171,13 +98,12 @@ exports.handler = async function() {
 
     const allFinnhubSymbols = [
         ...INDICES.map(x => x.t),
+        ...MACRO.filter(x => x.t !== 'BTCUSD').map(x => x.t), // GLD, IEF
         ...Object.values(GROUPS).flat()
     ];
 
-    const [btc, gold, treasury, finnhubResults] = await Promise.all([
+    const [btc, finnhubResults] = await Promise.all([
       coingeckoBTC().catch(e => (console.error("BTC fetch failed:", e.message), null)),
-      polygonGold().catch(e => (console.error("Gold fetch failed:", e.message), null)),
-      polygonTreasury().catch(e => (console.error("Treasury fetch failed:", e.message), null)),
       batchFinnhub(allFinnhubSymbols),
     ]);
     
@@ -188,24 +114,15 @@ exports.handler = async function() {
         return q ? { ...q, name: x.name } : null;
     }).filter(Boolean);
 
-    const macro = [btc, gold, treasury].filter(Boolean);
+    const gld = qMap.get("GLD");
+    const ief = qMap.get("IEF");
+    const macro = [btc, gld && { ...gld, name: "Gold (GLD)" }, ief && { ...ief, name: "US Treasuries 7-10Y" }].filter(Boolean);
 
-    // Get only the TOP MOVER from each sector
-    const ai = getTopMover(GROUPS.ai, qMap);
-    const crypto = getTopMover(GROUPS.crypto, qMap);
-    const energy = getTopMover(GROUPS.energy, qMap);
+    const ai     = topMovers(GROUPS.ai, qMap, 10);
+    const crypto = topMovers(GROUPS.crypto, qMap, 10);
+    const energy = topMovers(GROUPS.energy, qMap, 10);
 
-    const payload = { 
-      status:"ok", 
-      data:{ 
-        macro, 
-        indices, 
-        ai, 
-        crypto, 
-        energy, 
-        movers:{ ai, crypto, energy } 
-      } 
-    };
+    const payload = { status:"ok", data:{ macro, indices, ai, crypto, energy, movers:{ ai, crypto, energy } } };
     
     writeCache(payload);
     return { statusCode: 200, headers: HEADERS, body: JSON.stringify(payload) };
