@@ -13,15 +13,15 @@ const FINNHUB_KEY = process.env.FINNHUB_API_KEY || "";
 
 /* ===== Symbols ===== */
 const INDICES = [
-  { t: "DIA",  name: "Dow Jones" },
-  { t: "SPY",  name: "S&P 500" },
-  { t: "QQQ",  name: "Nasdaq 100" },
+  { t: "^NYA",  name: "NYSE Composite" }, // NYSE
+  { t: "SPY",   name: "S&P 500" },
+  { t: "QQQ",   name: "Nasdaq" }, // Keep QQQ but rename to just "Nasdaq"
 ];
 
 const MACRO = [
   { t: "BTCUSD", name: "Bitcoin" },
-  { t: "GLD",    name: "Gold (GLD)" },
-  { t: "IEF",    name: "US Treasuries 7-10Y" },
+  { t: "GLD",    name: "Gold" }, // Remove "(GLD)" from display
+  { t: "^TNX",   name: "US Treasury 10 Year" }, // 10-year Treasury yield
 ];
 
 const GROUPS = {
@@ -35,10 +35,26 @@ const toNum = v => (Number.isFinite(+v) ? +v : null);
 const readCache = () => { try { return fs.existsSync(CACHE_FILE) ? JSON.parse(fs.readFileSync(CACHE_FILE,"utf8")) : null; } catch { return null; } };
 const writeCache = payload => { try { fs.writeFileSync(CACHE_FILE, JSON.stringify({ ts: Date.now(), payload })); } catch {} };
 const toMap = arr => { const m=new Map(); (arr||[]).forEach(x=>x?.ticker&&m.set(x.ticker,x)); return m; };
-function topMovers(universe, map, n=10){
-  const rows=[]; for(const t of universe){ const q=map.get(t); if(q && Number.isFinite(q.dp)) rows.push({ticker:t,c:q.c,d:q.d,dp:q.dp}); }
-  rows.sort((a,b)=>Math.abs(b.dp)-Math.abs(a.dp)); return rows.slice(0,n);
+
+// Get TOP MOVER (highest absolute percentage change) from each sector
+function getTopMover(universe, map) {
+  let topMover = null;
+  let maxAbsChange = 0;
+  
+  for(const ticker of universe) {
+    const quote = map.get(ticker);
+    if(quote && Number.isFinite(quote.dp)) {
+      const absChange = Math.abs(quote.dp);
+      if(absChange > maxAbsChange) {
+        maxAbsChange = absChange;
+        topMover = {ticker, c: quote.c, d: quote.d, dp: quote.dp};
+      }
+    }
+  }
+  
+  return topMover ? [topMover] : [];
 }
+
 function httpsGet(url, tag="request"){
   return new Promise((resolve,reject)=>{
     const u=new URL(url);
@@ -98,7 +114,7 @@ exports.handler = async function() {
 
     const allFinnhubSymbols = [
         ...INDICES.map(x => x.t),
-        ...MACRO.filter(x => x.t !== 'BTCUSD').map(x => x.t), // GLD, IEF
+        ...MACRO.filter(x => x.t !== 'BTCUSD').map(x => x.t), // GLD, ^TNX
         ...Object.values(GROUPS).flat()
     ];
 
@@ -115,14 +131,29 @@ exports.handler = async function() {
     }).filter(Boolean);
 
     const gld = qMap.get("GLD");
-    const ief = qMap.get("IEF");
-    const macro = [btc, gld && { ...gld, name: "Gold (GLD)" }, ief && { ...ief, name: "US Treasuries 7-10Y" }].filter(Boolean);
+    const tnx = qMap.get("^TNX");
+    const macro = [
+      btc, 
+      gld && { ...gld, name: "Gold" }, // Remove "(GLD)" 
+      tnx && { ...tnx, name: "US Treasury 10 Year" }
+    ].filter(Boolean);
 
-    const ai     = topMovers(GROUPS.ai, qMap, 10);
-    const crypto = topMovers(GROUPS.crypto, qMap, 10);
-    const energy = topMovers(GROUPS.energy, qMap, 10);
+    // Get only the TOP MOVER from each sector
+    const ai = getTopMover(GROUPS.ai, qMap);
+    const crypto = getTopMover(GROUPS.crypto, qMap);
+    const energy = getTopMover(GROUPS.energy, qMap);
 
-    const payload = { status:"ok", data:{ macro, indices, ai, crypto, energy, movers:{ ai, crypto, energy } } };
+    const payload = { 
+      status:"ok", 
+      data:{ 
+        macro, 
+        indices, 
+        ai, 
+        crypto, 
+        energy, 
+        movers:{ ai, crypto, energy } 
+      } 
+    };
     
     writeCache(payload);
     return { statusCode: 200, headers: HEADERS, body: JSON.stringify(payload) };
