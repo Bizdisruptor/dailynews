@@ -122,7 +122,7 @@ exports.handler = async function() {
     const crypto = topMovers(GROUPS.crypto, qMap, 10);
     const energy = topMovers(GROUPS.energy, qMap, 10);
 
-    const payload = { status:"ok", data:{ macro, indices, ai, crypto, energy, movers:{ ai, crypto, energy } } };
+    const payload = { status:"ok", data:{ macro, indices, ai, crypto, energy } };
     
     writeCache(payload);
     return { statusCode: 200, headers: HEADERS, body: JSON.stringify(payload) };
@@ -130,7 +130,7 @@ exports.handler = async function() {
     console.error("market-data fatal:", e.message);
     const cached = readCache();
     if (cached?.payload) return { statusCode: 200, headers: HEADERS, body: JSON.stringify(cached.payload) };
-    const payload = { status:"ok", data:{ macro:[], indices:[], ai:[], crypto:[], energy:[], movers:{ ai:[], crypto:[], energy:[] } }, note:`fatal:${e.message}` };
+    const payload = { status:"ok", data:{ macro:[], indices:[], ai:[], crypto:[], energy:[] }, note:`fatal:${e.message}` };
     return { statusCode: 200, headers: HEADERS, body: JSON.stringify(payload) };
   }
 };
