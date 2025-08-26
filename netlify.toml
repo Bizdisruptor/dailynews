@@ -9,14 +9,14 @@
   status = 200
   conditions = { Host = ["api.thecerfreport.com"] }
 
-# ---------- Redirect EVERYTHING on Netlify hosts to the apex (EXCEPT functions) ----------
+# ---------- Allow functions on Netlify subdomain (IMPORTANT FIX) ----------
 [[redirects]]
   from = "/.netlify/functions/*"
   to = "/.netlify/functions/:splat"
   status = 200
-  force = false
   conditions = { Host = ["cerfreportnews.netlify.app", "*--cerfreportnews.netlify.app"] }
 
+# ---------- Redirect everything else on Netlify hosts to main domain ----------
 [[redirects]]
   from = "/*"
   to = "https://thecerfreport.com/:splat"
@@ -25,7 +25,6 @@
   conditions = { Host = ["cerfreportnews.netlify.app", "*--cerfreportnews.netlify.app"] }
 
 # ---------- Headers ----------
-# Prod (custom domains): indexable
 [[headers]]
   for = "/*"
   conditions = { Host = ["thecerfreport.com", "www.thecerfreport.com", "api.thecerfreport.com"] }
@@ -33,7 +32,6 @@
   X-Robots-Tag = "all"
   Strict-Transport-Security = "max-age=31536000; includeSubDomains; preload"
 
-# Netlify hosts (including deploy previews): keep noindex (optional)
 [[headers]]
   for = "/*"
   conditions = { Host = ["cerfreportnews.netlify.app", "*--cerfreportnews.netlify.app"] }
