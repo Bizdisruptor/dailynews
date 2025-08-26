@@ -2,22 +2,26 @@
   publish = "."
   functions = "netlify/functions"
 
-# --- Redirects ---
+# ---------- Redirect EVERYTHING on Netlify hosts to the apex ----------
 [[redirects]]
-  from = "https://cerfreportnews.netlify.app/*"
+  from = "/*"
   to = "https://thecerfreport.com/:splat"
   status = 301
   force = true
+  conditions = { Host = ["cerfreportnews.netlify.app", "*--cerfreportnews.netlify.app"] }
 
-[[redirects]]
-  from = "https://*--cerfreportnews.netlify.app/*"
-  to = "https://thecerfreport.com/:splat"
-  status = 301
-  force = true
-
-# --- Headers ---
+# ---------- Headers ----------
+# Prod (custom domains): indexable
 [[headers]]
   for = "/*"
+  conditions = { Host = ["thecerfreport.com", "www.thecerfreport.com"] }
   [headers.values]
-  # Allow search engines to index
   X-Robots-Tag = "all"
+  Strict-Transport-Security = "max-age=31536000; includeSubDomains; preload"
+
+# Netlify hosts (including deploy previews): keep noindex (optional)
+[[headers]]
+  for = "/*"
+  conditions = { Host = ["cerfreportnews.netlify.app", "*--cerfreportnews.netlify.app"] }
+  [headers.values]
+  X-Robots-Tag = "noindex"
