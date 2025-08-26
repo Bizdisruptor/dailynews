@@ -38,17 +38,17 @@ const MACRO_ETF = [
 
 // Stooq symbols (for fallback #3)
 const STOOQ_REAL = [
-  { t: "^dji",    map: "^DJI",  name: "Dow Jones" },
-  { t: "^spx",    map: "^GSPC", name: "S&P 500" },
-  { t: "^ixic",   map: "^IXIC", name: "Nasdaq" },
-  { t: "xauusd",  map: "XAUUSD=X", name: "Gold (Spot)" },
+  { t: "^dji",   map: "^DJI",  name: "Dow Jones" },
+  { t: "^spx",   map: "^GSPC", name: "S&P 500" },
+  { t: "^ixic",  map: "^IXIC", name: "Nasdaq" },
+  { t: "xauusd", map: "XAUUSD=X", name: "Gold (Spot)" },
 ];
 const STOOQ_ETF  = [
-  { t: "dia.us",  map: "DIA",  name: "Dow Jones (DIA)" },
-  { t: "spy.us",  map: "SPY",  name: "S&P 500 (SPY)" },
-  { t: "qqq.us",  map: "QQQ",  name: "Nasdaq 100 (QQQ)" },
-  { t: "gld.us",  map: "GLD",  name: "Gold (GLD proxy)" },
-  { t: "ief.us",  map: "IEF",  name: "US Treasuries 7–10Y (IEF)" },
+  { t: "dia.us", map: "DIA",  name: "Dow Jones (DIA)" },
+  { t: "spy.us", map: "SPY",  name: "S&P 500 (SPY)" },
+  { t: "qqq.us", map: "QQQ",  name: "Nasdaq 100 (QQQ)" },
+  { t: "gld.us", map: "GLD",  name: "Gold (GLD proxy)" },
+  { t: "ief.us", map: "IEF",  name: "US Treasuries 7–10Y (IEF)" },
 ];
 
 const GROUPS = {
@@ -196,10 +196,9 @@ exports.handler = async function(event){
       notes.push("fallbackB:stooq-real");
       const sReal = await stooqList(STOOQ_REAL).catch(e => (notes.push(`stooq-real:${e.message}`), []));
       const sIdx = sReal.filter(q => ["^DJI","^GSPC","^IXIC"].includes(q.ticker));
-      // keep macro gold if Yahoo failed
       const sGold = sReal.find(q => q.ticker === "XAUUSD=X");
       if (sIdx.length) indices = sIdx;
-      if (!macro.length) macro = [btc, sGold].filter(Boolean); // no IEF here (we’ll try ETF next)
+      if (!macro.length) macro = [btc, sGold].filter(Boolean);
     }
 
     // ----- Fallback C: Stooq ETFs (prices only) -----
