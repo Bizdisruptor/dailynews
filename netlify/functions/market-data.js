@@ -13,15 +13,15 @@ const FINNHUB_KEY = process.env.FINNHUB_API_KEY || "";
 
 /* ===== Symbols ===== */
 const INDICES = [
-  { t: "^NYA",  name: "NYSE Composite" }, // NYSE
+  { t: "^NYA",  name: "NYSE Composite" }, // NYSE - but this might not work, try NYA or use SPY for S&P 500
   { t: "SPY",   name: "S&P 500" },
-  { t: "QQQ",   name: "Nasdaq" }, // Keep QQQ but rename to just "Nasdaq"
+  { t: "QQQ",   name: "Nasdaq" },
 ];
 
 const MACRO = [
   { t: "BTCUSD", name: "Bitcoin" },
-  { t: "GLD",    name: "Gold" }, // Remove "(GLD)" from display
-  { t: "^TNX",   name: "US Treasury 10 Year" }, // 10-year Treasury yield
+  { t: "GOLD_SPOT", name: "Gold" }, // We'll get this from a different API
+  { t: "^TNX",   name: "10-Yr Bond" }, // 10-year Treasury yield
 ];
 
 const GROUPS = {
@@ -104,6 +104,20 @@ async function coingeckoBTC(){
   return { ticker:"BTCUSD", name:"Bitcoin", c:price, d: (price!=null&&pct!=null? price*(pct/100):null), dp:pct };
 }
 
+// Get spot gold price from CoinGecko (they have gold data)
+async function getGoldSpotPrice(){
+  try {
+    const url="https://api.coingecko.com/api/v3/simple/price?ids=gold&vs_currencies=usd&include_24hr_change=true";
+    const data=await httpsGet(url,"coingecko:gold");
+    const price=toNum(data?.gold?.usd);
+    const pct=toNum(data?.gold?.usd_24h_change);
+    return { ticker:"GOLD_SPOT", name:"Gold", c:price, d: (price!=null&&pct!=null? price*(pct/100):null), dp:pct };
+  } catch (e) {
+    console.warn("Gold spot price failed:", e.message);
+    return null;
+  }
+}
+
 /* ===== Handler ===== */
 exports.handler = async function() {
   try {
@@ -114,12 +128,13 @@ exports.handler = async function() {
 
     const allFinnhubSymbols = [
         ...INDICES.map(x => x.t),
-        ...MACRO.filter(x => x.t !== 'BTCUSD').map(x => x.t), // GLD, ^TNX
+        "^TNX", // 10-year Treasury yield
         ...Object.values(GROUPS).flat()
     ];
 
-    const [btc, finnhubResults] = await Promise.all([
+    const [btc, goldSpot, finnhubResults] = await Promise.all([
       coingeckoBTC().catch(e => (console.error("BTC fetch failed:", e.message), null)),
+      getGoldSpotPrice().catch(e => (console.error("Gold fetch failed:", e.message), null)),
       batchFinnhub(allFinnhubSymbols),
     ]);
     
@@ -130,12 +145,11 @@ exports.handler = async function() {
         return q ? { ...q, name: x.name } : null;
     }).filter(Boolean);
 
-    const gld = qMap.get("GLD");
     const tnx = qMap.get("^TNX");
     const macro = [
       btc, 
-      gld && { ...gld, name: "Gold" }, // Remove "(GLD)" 
-      tnx && { ...tnx, name: "US Treasury 10 Year" }
+      goldSpot, // Spot gold price
+      tnx && { ...tnx, name: "10-Yr Bond" } // Treasury yield as percentage
     ].filter(Boolean);
 
     // Get only the TOP MOVER from each sector
