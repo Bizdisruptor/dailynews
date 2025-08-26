@@ -8,10 +8,11 @@ const TTL_MS = 1000 * 60 * 3; // 3 minutes
 const REQ_TIMEOUT = 8000;
 
 const FINNHUB_KEY = process.env.FINNHUB_API_KEY || "";
+const POLYGON_KEY = process.env.POLYGON_API_KEY || "";
 
-/* ===== Symbols - Using working symbols only ===== */
+/* ===== Symbols ===== */
 const INDICES = [
-  { t: "DIA",  name: "NYSE" }, // Use DIA for NYSE representation
+  { t: "DIA",  name: "NYSE" },
   { t: "SPY",  name: "S&P 500" },
   { t: "QQQ",  name: "Nasdaq" },
 ];
@@ -95,53 +96,67 @@ async function coingeckoBTC(){
   return { ticker:"BTCUSD", name:"Bitcoin", c:price, d: (price!=null&&pct!=null? price*(pct/100):null), dp:pct };
 }
 
-// Get gold from a working API - using metals-api.com free tier
-async function getGoldPrice() {
+// Get gold spot price from Polygon
+async function polygonGold() {
+  if (!POLYGON_KEY) throw new Error("Missing POLYGON_API_KEY");
+  
   try {
-    // Alternative: Use Alpha Vantage or another reliable source
-    // For now, let's use a simple forex API that includes gold
-    const url = "https://api.fxapi.com/v1/latest?base=XAU&symbols=USD"; // XAU = Gold
-    const data = await httpsGet(url, "gold");
+    const today = new Date().toISOString().split('T')[0];
+    const yesterday = new Date(Date.now() - 24*60*60*1000).toISOString().split('T')[0];
     
-    if (data && data.rates && data.rates.USD) {
-      const goldPerOz = 1 / data.rates.USD; // Convert from USD per gold unit to gold price
+    // Polygon forex endpoint for XAU/USD (gold)
+    const url = `https://api.polygon.io/v1/open-close/C:XAUUSD/${yesterday}?adjusted=true&apikey=${POLYGON_KEY}`;
+    const data = await httpsGet(url, "polygon:gold");
+    
+    if (data && data.close && data.open) {
+      const price = toNum(data.close);
+      const change = toNum(data.close - data.open);
+      const changePercent = toNum((change / data.open) * 100);
+      
       return { 
-        ticker: "GOLD", 
+        ticker: "XAUUSD", 
         name: "Gold", 
-        c: goldPerOz, 
-        d: 0, // We don't have change data from this API
-        dp: 0 
+        c: price, 
+        d: change, 
+        dp: changePercent 
       };
     }
     return null;
   } catch (e) {
-    console.warn("Gold price fetch failed:", e.message);
-    
-    // Fallback: Use a fixed gold price for now (you can update this manually or use another API)
-    return { 
-      ticker: "GOLD", 
-      name: "Gold", 
-      c: 2650.50, // Approximate current gold price
-      d: 0, 
-      dp: 0 
-    };
+    console.warn("Polygon gold failed:", e.message);
+    return null;
   }
 }
 
-// Get 10-year Treasury yield - try a different approach
-async function getTreasuryYield() {
+// Get 10-year Treasury yield from Polygon
+async function polygonTreasury() {
+  if (!POLYGON_KEY) throw new Error("Missing POLYGON_API_KEY");
+  
   try {
-    // Alternative approach: Use FRED API or another source
-    // For now, return a placeholder that works
-    return { 
-      ticker: "TNX", 
-      name: "10-Yr Bond", 
-      c: 4.26, // Current approximate 10-year yield
-      d: -0.02, 
-      dp: -0.47 
-    };
+    const today = new Date().toISOString().split('T')[0];
+    const yesterday = new Date(Date.now() - 24*60*60*1000).toISOString().split('T')[0];
+    
+    // Polygon has Treasury data under different symbols
+    // Try DGS10 (10-Year Treasury Constant Maturity Rate)
+    const url = `https://api.polygon.io/v1/open-close/I:DGS10/${yesterday}?adjusted=true&apikey=${POLYGON_KEY}`;
+    const data = await httpsGet(url, "polygon:treasury");
+    
+    if (data && data.close && data.open) {
+      const yield_ = toNum(data.close);
+      const change = toNum(data.close - data.open);
+      const changePercent = toNum((change / data.open) * 100);
+      
+      return { 
+        ticker: "DGS10", 
+        name: "10-Yr Bond", 
+        c: yield_, 
+        d: change, 
+        dp: changePercent 
+      };
+    }
+    return null;
   } catch (e) {
-    console.warn("Treasury yield fetch failed:", e.message);
+    console.warn("Polygon treasury failed:", e.message);
     return null;
   }
 }
@@ -161,8 +176,8 @@ exports.handler = async function() {
 
     const [btc, gold, treasury, finnhubResults] = await Promise.all([
       coingeckoBTC().catch(e => (console.error("BTC fetch failed:", e.message), null)),
-      getGoldPrice().catch(e => (console.error("Gold fetch failed:", e.message), null)),
-      getTreasuryYield().catch(e => (console.error("Treasury fetch failed:", e.message), null)),
+      polygonGold().catch(e => (console.error("Gold fetch failed:", e.message), null)),
+      polygonTreasury().catch(e => (console.error("Treasury fetch failed:", e.message), null)),
       batchFinnhub(allFinnhubSymbols),
     ]);
     
