@@ -11,25 +11,44 @@
     h1{text-align:center;color:var(--blue);margin:0 0 6px}
     .subhead{text-align:center;color:var(--muted);margin:0 0 18px;font-size:.95rem}
 
-    .market {
-      background:var(--paper); border-radius:12px; box-shadow:0 2px 6px rgba(0,0,0,.08);
-      padding:12px 14px; margin:0 auto 18px; max-width:1400px;
+    /* ===== Market header (framed) ===== */
+    .market{
+      background:var(--paper);
+      border-radius:14px;
+      box-shadow:0 2px 6px rgba(0,0,0,.06);
+      border:1px solid rgba(0,0,0,.08);        /* frame */
+      padding:14px 18px;
+      margin:0 auto 18px; max-width:1400px;
     }
-    .market .row { display:flex; flex-wrap:wrap; gap:16px 24px; align-items:center; justify-content: center;}
-    .chip { display:flex; gap:6px; align-items:center; font-size:.92rem; }
+    .market .row{ display:flex; flex-wrap:wrap; gap:10px 14px; align-items:center; justify-content:center; }
+    .market .label{ width:100%; text-align:center; color:var(--muted); font-size:.8rem; margin:2px 0 6px; letter-spacing:.25px; text-transform:uppercase; }
+
+    /* Pill-style quote chips */
+    .chip{
+      display:flex; gap:8px; align-items:baseline;
+      font-size:.95rem; line-height:1;
+      background:#f7f9fc;
+      border:1px solid rgba(0,0,0,.08);
+      border-radius:9999px;
+      padding:6px 10px;
+      white-space:nowrap;
+    }
     .chip a { color:inherit; text-decoration:none; font-weight:600; }
     .chip a:hover { text-decoration:underline; color:var(--blue); }
-    .price { font-weight:600; }
+    .price { font-weight:600; font-variant-numeric: tabular-nums; }
+    .chg{ font-variant-numeric: tabular-nums; }
     .chg.positive{ color:var(--positive); }
     .chg.negative{ color:var(--negative); }
-    .divider { height:10px }
+    .divider { width:12px; height:1px }
 
+    /* Movers */
     .mover-grid { display:grid; gap:10px 14px; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); margin-top:8px; }
     .mgroup h3 { margin:0 0 6px; font-size:.8rem; color:var(--blue); letter-spacing:.5px; text-transform:uppercase; }
-    .mlist div { display:flex; justify-content:space-between; font-size:.88rem; padding:1px 0; }
+    .mlist div { display:flex; justify-content:space-between; font-size:.88rem; padding:2px 0; font-variant-numeric: tabular-nums; }
     .mlist a { font-weight:600; color:inherit; text-decoration:none; }
     .mlist a:hover { text-decoration:underline; color:var(--blue); }
 
+    /* Cards */
     .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:18px; max-width:1400px; margin:0 auto}
     .card{background:var(--paper);border-radius:12px;box-shadow:0 2px 6px rgba(0,0,0,.08);padding:16px;overflow:hidden}
     .card h2{margin:0 0 8px;border-bottom:2px solid var(--blue);padding-bottom:8px;font-size:1.1rem}
@@ -122,14 +141,16 @@
     function renderMarket(data){
       const m = $('#market');
       if(!data){ m.innerHTML = '<div class="loading">Could not load market data.</div>'; return; }
-      const macro   = (data.macro||[]).map(chipHTML).join('<span class="divider"></span>');
-      const indices = (data.indices||[]).map(chipHTML).join('<span class="divider"></span>');
+      const macro   = (data.macro||[]).map(chipHTML).join('');
+      const indices = (data.indices||[]).map(chipHTML).join('');
       const ai      = listHTML(data.ai);
       const crypto  = listHTML(data.crypto);
       const energy  = listHTML(data.energy);
       m.innerHTML = `
+        <div class="label">Macro</div>
         <div class="row">${macro}</div>
-        <div class="divider"></div>
+        <div class="divider" style="height:12px"></div>
+        <div class="label">Indices</div>
         <div class="row">${indices}</div>
         <div class="mover-grid">
           <div class="mgroup"><h3>AI</h3><div class="mlist">${ai}</div></div>
@@ -182,11 +203,10 @@
       if(data.status !== "ok" || !Array.isArray(data.articles)) return null;
       return data.articles.map(a=>({ title:a.title||"Untitled", url:a.url, description:a.description||"" }));
     }
-    
     async function fetchRecommended(){
-        const data = await fetchJSON(ABS("/.netlify/functions/get-links"));
-        if(data.status !== "ok") return null;
-        return data.articles || null;
+      const data = await fetchJSON(ABS("/.netlify/functions/get-links"));
+      if(data.status !== "ok") return null;
+      return data.articles || null;
     }
 
     async function updateAll(){
