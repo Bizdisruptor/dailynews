@@ -2,7 +2,14 @@
   publish = "."
   functions = "netlify/functions"
 
-# ---------- Redirect EVERYTHING on Netlify hosts to the apex ----------
+# ---------- Redirect EVERYTHING on Netlify hosts to the apex (EXCEPT functions) ----------
+[[redirects]]
+  from = "/.netlify/functions/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
+  force = false
+  conditions = { Host = ["cerfreportnews.netlify.app", "*--cerfreportnews.netlify.app"] }
+
 [[redirects]]
   from = "/*"
   to = "https://thecerfreport.com/:splat"
