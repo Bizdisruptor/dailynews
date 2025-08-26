@@ -106,7 +106,7 @@
   <div class="footer" id="updatedAt"></div>
 
   <script>
-    const ABS = (path) => new URL(path, location.origin).toString();
+    const ABS = (path) => new URL(path, 'https://cerfreportnews.netlify.app').toString();
     const FINANCE = (t) => `https://finance.yahoo.com/quote/${encodeURIComponent(t)}`;
     const $ = (sel, root=document) => root.querySelector(sel);
 
@@ -117,20 +117,59 @@
       { id: "finance-card", section: "finance" },
     ];
 
-    function fmt(n, d=2){ if(n==null || isNaN(n)) return "—"; return (+n).toFixed(d); }
+    function fmt(n, d=2){ 
+      if(n==null || isNaN(n)) return "—"; 
+      return (+n).toFixed(d); 
+    }
+    
+    function formatPrice(q) {
+      if (!q || q.c == null) return '—';
+      
+      // Format based on asset type
+      if (q.name === 'Bitcoin') {
+        return q.c.toLocaleString('en-US', {maximumFractionDigits: 0});
+      } else if (q.name === 'Gold') {
+        return '$' + q.c.toLocaleString('en-US', {minimumFractionDigits: 2});
+      } else if (q.name === '10-Yr Bond') {
+        return q.c.toFixed(4) + '%';
+      } else {
+        return fmt(q.c);
+      }
+    }
+    
+    function formatChange(q) {
+      if (!q) return { value: '0.00', sign: '', cls: 'positive' };
+      
+      const sign = (q.d ?? 0) >= 0 ? "+" : "";
+      const cls = (q.d ?? 0) >= 0 ? "positive" : "negative";
+      
+      // Format change value based on asset type
+      let changeValue;
+      if (q.name === '10-Yr Bond') {
+        changeValue = fmt(q.d, 4);
+      } else {
+        changeValue = fmt(q.d);
+      }
+      
+      return { value: changeValue, sign, cls };
+    }
+    
     function chipHTML(q){
       if (!q) return '';
-      const sign = (q.d ?? 0) >= 0 ? "+" : "";
-      const cls  = (q.d ?? 0) >= 0 ? "positive" : "negative";
+      const price = formatPrice(q);
+      const change = formatChange(q);
+      
       return `<span class="chip">
         <a href="${FINANCE(q.ticker)}" target="_blank" rel="noopener">${q.name}</a>
-        <span class="price">${fmt(q.c)}</span>
-        <span class="chg ${cls}">${sign}${fmt(q.d)} (${sign}${fmt(q.dp)}%)</span>
+        <span class="price">${price}</span>
+        <span class="chg ${change.cls}">${change.sign}${change.value} (${change.sign}${fmt(q.dp)}%)</span>
       </span>`;
     }
+    
     function listHTML(arr){
       return (arr||[]).map(q=>{
-        const sign=(q.d??0)>=0?"+":""; const cls=(q.d??0)>=0?"positive":"negative";
+        const sign=(q.d??0)>=0?"+":""; 
+        const cls=(q.d??0)>=0?"positive":"negative";
         return `<div>
           <a href="${FINANCE(q.ticker)}" target="_blank" rel="noopener">${q.ticker}</a>
           <span class="${cls}">${sign}${fmt(q.d)} (${sign}${fmt(q.dp)}%)</span>
