@@ -2,6 +2,13 @@
   publish = "."
   functions = "netlify/functions"
 
+# ---------- Handle API subdomain (no redirect for api.thecerfreport.com) ----------
+[[redirects]]
+  from = "/*"
+  to = "/:splat"
+  status = 200
+  conditions = { Host = ["api.thecerfreport.com"] }
+
 # ---------- Redirect EVERYTHING on Netlify hosts to the apex (EXCEPT functions) ----------
 [[redirects]]
   from = "/.netlify/functions/*"
@@ -21,7 +28,7 @@
 # Prod (custom domains): indexable
 [[headers]]
   for = "/*"
-  conditions = { Host = ["thecerfreport.com", "www.thecerfreport.com"] }
+  conditions = { Host = ["thecerfreport.com", "www.thecerfreport.com", "api.thecerfreport.com"] }
   [headers.values]
   X-Robots-Tag = "all"
   Strict-Transport-Security = "max-age=31536000; includeSubDomains; preload"
