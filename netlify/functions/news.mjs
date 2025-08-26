@@ -3,10 +3,9 @@
 // Durable cache via Netlify Blobs + API rotation + RSS fallback.
 // Requires package.json dependency: "@netlify/blobs": "^6.0.0"
 
-import { createClient } from '@netlify/blobs';
+import { getStore } from '@netlify/blobs'; // ✅ FIX: Changed createClient to getStore
 
-const blobs = createClient();
-const store = blobs.store('news-cache');
+const store = getStore('news-cache'); // ✅ FIX: Correctly initialize the store
 
 const MAX_ITEMS = 25;
 
@@ -149,9 +148,19 @@ const PROVIDER_IMPL = {
 
 /* ---------------- utils ---------------- */
 
-function mapCategory(section)      { return { world: 'general', tech: 'technology', finance: 'business' }[section] || 'general'; }
-function mapGNewsTopic(section)    { return { world: 'world',   tech: 'technology', finance: 'business' }[section] || 'breaking-news'; }
-function mapNewsDataCat(section)   { return { world: 'world',   tech: 'technology', finance: 'business' }[section] || 'top'; }
+function mapCategory(section)     { return { world: 'general', tech: 'technology', finance: 'business' }[section] || 'general'; }
+function mapGNewsTopic(section)   { return { world: 'world',   tech: 'technology', finance: 'business' }[section] || 'breaking-news'; }
+function mapNewsDataCat(section)  { return { world: 'world',   tech: 'technology', finance: 'business' }[section] || 'top'; }
+
+function pickRss(section) {
+    const feeds = {
+        frontpage: ["http://feeds.feedburner.com/DrudgeReportFeed", "https://feeds.bbci.co.uk/news/rss.xml"],
+        world: ["https://feeds.bbci.co.uk/news/world/rss.xml", "http://feeds.reuters.com/Reuters/worldNews"],
+        tech: ["http://feeds.feedburner.com/TechCrunch/", "https://www.theverge.com/rss/index.xml"],
+        finance: ["http://feeds.reuters.com/reuters/businessNews", "https://www.cnbc.com/id/10000664/device/rss/rss.html"],
+    };
+    return feeds[section] || feeds.frontpage;
+}
 
 function norm(title, url, source, summary, ts) {
   if (!title || !url) return null;
@@ -180,7 +189,7 @@ function parseRSS(xml){
   const out=[]; const blocks = xml.match(/<item[\s\S]*?<\/item>/gi) || xml.match(/<entry[\s\S]*?<\/entry>/gi) || [];
   for(const b of blocks){
     const T = (tag)=>(b.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`,'i'))||[, ''])[1].trim();
-    let link = (b.match(/<link[^>]*>([\s\S]*?)<\/link>/i)||[, ''])[1].trim();
+    let link = (b.match(/<link[^>]*>([\s\\S]*?)<\/link>/i)||[, ''])[1].trim();
     if(!link){ const alt=b.match(/<link[^>]*rel=["']alternate["'][^>]*href=["']([^"']+)["']/i); if(alt) link=alt[1]; }
     if(!link){ const href=b.match(/<link[^>]*href=["']([^"']+)["']/i); if(href) link=href[1]; }
     const title = decode(T('title'));
@@ -202,4 +211,10 @@ function nodeJson(body, status = 200, extraHeaders = {}) {
     headers: { 'content-type': 'application/json; charset=utf-8', 'access-control-allow-origin': '*', ...extraHeaders },
     body: JSON.stringify(body)
   };
+}
+
+function timeout(ms) {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), ms);
+    return controller.signal;
 }
