@@ -1,13 +1,14 @@
 // netlify/functions/mini-market.js
-// Minimal server-side fetch for BTC-USD and XAU-USD with caching.
+// Minimal server-side fetch for BTC-USD and XAU-USD with caching and timeouts.
+// CommonJS; works on Netlify Functions (Node 18+).
 
 const fs = require("fs");
 
 const CACHE_FILE = "/tmp/mini-market-cache.json";
-const TTL_MS = 1000 * 60 * 3; // 3 minutes
+const TTL_MS = 1000 * 60 * 3; // cache 3 minutes
 const HEADERS = {
   "Content-Type": "application/json",
-  "Access-Control-Allow-Origin": "*"
+  "Access-Control-Allow-Origin": "*",
 };
 
 function readCache() {
@@ -15,9 +16,13 @@ function readCache() {
     return fs.existsSync(CACHE_FILE)
       ? JSON.parse(fs.readFileSync(CACHE_FILE, "utf8"))
       : null;
-  } catch (_) { return null; }
+  } catch (_) {
+    return null;
+  }
 }
-function writeCache(obj) { try { fs.writeFileSync(CACHE_FILE, JSON.stringify(obj)); } catch (_) {} }
+function writeCache(obj) {
+  try { fs.writeFileSync(CACHE_FILE, JSON.stringify(obj)); } catch (_) {}
+}
 
 async function withTimeout(url, ms) {
   const ac = new AbortController();
@@ -26,52 +31,69 @@ async function withTimeout(url, ms) {
   finally { clearTimeout(t); }
 }
 
+// ---------- Providers ----------
 async function getBTC_USD() {
-  // Primary: Coingecko
+  // 1) Coingecko
   try {
     const r = await withTimeout("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd", 8000);
     if (r.ok) {
       const j = await r.json();
       const v = j?.bitcoin?.usd;
-      if (typeof v === "number") return v;
+      if (typeof v === "number" && isFinite(v)) return v;
     }
   } catch (_) {}
-  // Fallback: Yahoo
+
+  // 2) Yahoo: BTC-USD
   try {
     const r = await withTimeout("https://query1.finance.yahoo.com/v7/finance/quote?symbols=BTC-USD", 8000);
     if (r.ok) {
       const j = await r.json();
       const q = j?.quoteResponse?.result?.[0];
       const v = q?.regularMarketPrice;
-      if (typeof v === "number") return v;
+      if (typeof v === "number" && isFinite(v)) return v;
     }
   } catch (_) {}
+
   return null;
 }
 
 async function getXAU_USD() {
-  // Primary: exchangerate.host
+  // 1) Yahoo spot gold (XAUUSD=X)
   try {
-    const r = await withTimeout("https://api.exchangerate.host/convert?from=XAU&to=USD", 8000);
+    const r = await withTimeout("https://query1.finance.yahoo.com/v7/finance/quote?symbols=XAUUSD=X", 8000);
     if (r.ok) {
       const j = await r.json();
-      const v = j?.result;
-      if (typeof v === "number") return v;
+      const q = j?.quoteResponse?.result?.[0];
+      const v = q?.regularMarketPrice;
+      if (typeof v === "number" && isFinite(v)) return v;
     }
   } catch (_) {}
-  // Fallback: Yahoo (Gold futures GC=F)
+
+  // 2) Yahoo gold futures (GC=F) as backup
   try {
     const r = await withTimeout("https://query1.finance.yahoo.com/v7/finance/quote?symbols=GC=F", 8000);
     if (r.ok) {
       const j = await r.json();
       const q = j?.quoteResponse?.result?.[0];
       const v = q?.regularMarketPrice;
-      if (typeof v === "number") return v;
+      if (typeof v === "number" && isFinite(v)) return v;
     }
   } catch (_) {}
+
+  // 3) exchangerate.host conversion XAU -> USD (USD per troy ounce)
+  try {
+    const r = await withTimeout("https://api.exchangerate.host/convert?from=XAU&to=USD", 8000);
+    if (r.ok) {
+      const j = await r.json();
+      const v = j?.result;
+      if (typeof v === "number" && isFinite(v)) return v;
+    }
+  } catch (_) {}
+
   return null;
 }
 
+// ---------- Handler ----------
 exports.handler = async () => {
   try {
     const cached = readCache();
@@ -88,9 +110,9 @@ exports.handler = async () => {
         xauUSD,
         links: {
           btc: "https://www.google.com/finance/quote/BTC-USD",
-          xau: "https://www.google.com/finance/quote/XAU-USD"
-        }
-      }
+          xau: "https://www.google.com/finance/quote/XAU-USD",
+        },
+      },
     };
 
     writeCache({ ts: Date.now(), payload });
@@ -100,6 +122,10 @@ exports.handler = async () => {
     if (cached?.payload) {
       return { statusCode: 200, headers: HEADERS, body: JSON.stringify(cached.payload) };
     }
-    return { statusCode: 500, headers: HEADERS, body: JSON.stringify({ status: "error", message: String(e?.message || e) }) };
+    return {
+      statusCode: 500,
+      headers: HEADERS,
+      body: JSON.stringify({ status: "error", message: String(e?.message || e) }),
+    };
   }
 };
