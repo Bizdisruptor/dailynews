@@ -15,22 +15,11 @@
       background:var(--paper); border-radius:12px; box-shadow:0 2px 6px rgba(0,0,0,.08);
       padding:12px 14px; margin:0 auto 18px; max-width:1400px;
     }
-    .market .row { display:flex; flex-wrap:wrap; gap:16px 24px; align-items:center; justify-content: center;}
-    .chip { display:flex; gap:6px; align-items:center; font-size:.92rem; }
+    .market .row { display:flex; flex-wrap:wrap; gap:16px 24px; align-items:center; justify-content:center; }
+    .chip { display:flex; gap:8px; align-items:center; font-size:1rem; }
     .chip a { color:inherit; text-decoration:none; font-weight:600; }
     .chip a:hover { text-decoration:underline; color:var(--blue); }
-    .price { font-weight:600; }
-    .chg.positive{ color:var(--positive); }
-    .chg.negative{ color:var(--negative); }
-    .divider { height:10px }
-
-    .mover-grid { display:grid; gap:10px 14px; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); margin-top:8px; }
-    .mgroup h3 { margin:0 0 6px; font-size:.8rem; color:var(--blue); letter-spacing:.5px; text-transform:uppercase; }
-    .mlist div { display:flex; justify-content:space-between; font-size:.88rem; padding:1px 0; align-items: baseline;}
-    .mlist a { font-weight:600; color:inherit; text-decoration:none; }
-    .mlist a:hover { text-decoration:underline; color:var(--blue); }
-    .ticker-price { display: flex; align-items: baseline; gap: 8px; }
-    .mlist .price { font-weight: 400; color: var(--muted); font-size: 0.9em; }
+    .price { font-weight:600; min-width:90px; text-align:right; }
 
     .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:18px; max-width:1400px; margin:0 auto}
     .card{background:var(--paper);border-radius:12px;box-shadow:0 2px 6px rgba(0,0,0,.08);padding:16px;overflow:hidden}
@@ -52,7 +41,19 @@
   <h1>The Cerf Report — Curated News</h1>
   <div class="subhead">News minus the junk. Tech, finance, and interesting stuff.</div>
 
-  <div class="market" id="market"><div class="loading">Loading market data…</div></div>
+  <!-- Simple Market: Bitcoin + Gold only -->
+  <div class="market" id="market">
+    <div class="row" id="simple-market">
+      <div class="chip" id="price-btc">
+        <a href="https://www.google.com/finance/quote/BTC-USD" target="_blank" rel="noopener">Bitcoin (BTC)</a>
+        <span class="price">—</span>
+      </div>
+      <div class="chip" id="price-xau">
+        <a href="https://www.google.com/finance/quote/XAU-USD" target="_blank" rel="noopener">Gold (XAU)</a>
+        <span class="price">—</span>
+      </div>
+    </div>
+  </div>
 
   <div class="grid">
     <div class="card" id="recommended-card">
@@ -89,65 +90,41 @@
   <div class="footer" id="updatedAt"></div>
 
   <script>
+    // -------- helpers --------
     const ABS = (path) => new URL(path, location.origin).toString();
-    const FINANCE = (t) => `https://finance.yahoo.com/quote/${encodeURIComponent(t)}`;
     const $ = (sel, root=document) => root.querySelector(sel);
 
-    const sections = [
-      { id: "front-card",   section: "frontpage" },
-      { id: "tech-card",    section: "tech" },
-      { id: "world-card",   section: "world" },
-      { id: "finance-card", section: "finance" },
-    ];
-
-    function fmt(n, d=2){ if(n==null || isNaN(n)) return "—"; return (+n).toFixed(d); }
-    function chipHTML(q){
-      if (!q) return '';
-      const sign = (q.d ?? 0) >= 0 ? "+" : "";
-      const cls  = (q.d ?? 0) >= 0 ? "positive" : "negative";
-      return `<span class="chip">
-        <a href="${FINANCE(q.ticker)}" target="_blank" rel="noopener">${q.name}</a>
-        <span class="price">${fmt(q.c)}</span>
-        <span class="chg ${cls}">${sign}${fmt(q.d)} (${sign}${fmt(q.dp)}%)</span>
-      </span>`;
-    }
-    
-    function listHTML(arr){
-      return (arr||[]).map(q=>{
-        const sign=(q.d??0)>=0?"+":""; const cls=(q.d??0)>=0?"positive":"negative";
-        return `<div>
-          <span class="ticker-price">
-            <a href="${FINANCE(q.ticker)}" target="_blank" rel="noopener">${q.ticker}</a>
-            <span class="price">${fmt(q.c)}</span>
-          </span>
-          <span class="chg ${cls}">${sign}${fmt(q.d)} (${sign}${fmt(q.dp)}%)</span>
-        </div>`;
-      }).join('');
+    function setPrice(elId, value){
+      const el = document.querySelector(`#${elId} .price`);
+      el.textContent = (value == null)
+        ? "—"
+        : Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
 
-    function renderMarket(data){
-      const m = $('#market');
-      if(!data){ m.innerHTML = '<div class="loading">Could not load market data.</div>'; return; }
-      const macro   = (data.macro||[]).map(chipHTML).join('<span class="divider"></span>');
-      const indices = (data.indices||[]).map(chipHTML).join('<span class="divider"></span>');
-      const ai      = listHTML(data.ai);
-      const crypto  = listHTML(data.crypto);
-      const energy  = listHTML(data.energy);
-      m.innerHTML = `
-        <div class="row">${macro}</div>
-        <div class="divider"></div>
-        <div class="row">${indices}</div>
-        <div class="mover-grid">
-          <div class="mgroup"><h3>AI</h3><div class="mlist">${ai}</div></div>
-          <div class="mgroup"><h3>CRYPTO</h3><div class="mlist">${crypto}</div></div>
-          <div class="mgroup"><h3>ENERGY</h3><div class="mlist">${energy}</div></div>
-        </div>`;
+    async function fetchBTCUSD(){
+      // Coingecko (no key, CORS OK)
+      const r = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd");
+      const j = await r.json();
+      return j?.bitcoin?.usd ?? null;
+    }
+
+    async function fetchXAUUSD(){
+      // exchangerate.host (no key, CORS OK) — USD per 1 troy ounce
+      const r = await fetch("https://api.exchangerate.host/convert?from=XAU&to=USD");
+      const j = await r.json();
+      return j?.result ?? null;
+    }
+
+    async function fetchJSON(url){
+      const r = await fetch(url, { redirect: "follow" });
+      if(!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
     }
 
     function renderNewsList(listEl, articles){
       if(!articles || !articles.length){
         if (listEl.innerHTML.includes('loading')) {
-            listEl.innerHTML = '<div class="loading">Could not load news at this time.</div>';
+          listEl.innerHTML = '<div class="loading">Could not load news at this time.</div>';
         }
         return;
       }
@@ -162,71 +139,6 @@
       }
     }
 
-    async function fetchJSON(url){
-      try{
-        const r = await fetch(url, { redirect: "follow" });
-        if(!r.ok) throw new Error(`HTTP ${r.status}`);
-        return await r.json();
-      }catch(e){
-        console.error("Fetch failed:", url, e);
-        throw e;
-      }
-    }
-
-    async function fetchMarket(){
-      const data = await fetchJSON(ABS("/.netlify/functions/market-data"));
-      if(data.status !== "ok" || !data.data) throw new Error("Bad market payload");
-      return data.data;
-    }
     async function fetchNews(section){
       const data = await fetchJSON(ABS(`/.netlify/functions/news?section=${encodeURIComponent(section)}`));
-      if(data.status !== "ok") return null;
-      return data.articles || null;
-    }
-    async function fetchCerf(){
-      const data = await fetchJSON(ABS("/.netlify/functions/substack?mode=archive"));
-      if(data.status !== "ok" || !Array.isArray(data.articles)) return null;
-      return data.articles.map(a=>({ title:a.title||"Untitled", url:a.url, description:a.description||"" }));
-    }
-    
-    async function fetchRecommended(){
-        const data = await fetchJSON(ABS("/.netlify/functions/get-links"));
-        if(data.status !== "ok") return null;
-        return data.articles || null;
-    }
-
-    async function updateAll(){
-      // Market
-      try{
-        const market = await fetchMarket();
-        renderMarket(market);
-      }catch(e){
-        console.error("Market error:", e);
-        renderMarket(null);
-      }
-
-      // News
-      try{
-        const results = await Promise.all([
-          fetchRecommended().catch(err => (console.error("recommended", err), null)),
-          ...sections.map(s => fetchNews(s.section).catch(err => (console.error(s.section, err), null))),
-          fetchCerf().catch(err => (console.error("substack", err), null))
-        ]);
-        renderNewsList($("#recommended-card .list"), results[0]);
-        sections.forEach((s, i) => renderNewsList($(`#${s.id} .list`), results[i+1]));
-        renderNewsList($("#cerf-card .list"), results[sections.length+1]);
-      }catch(e){
-        console.error("News update error:", e);
-      }
-
-      const year = new Date().getFullYear();
-      $("#updatedAt").innerHTML = `Updated ${new Date().toLocaleString()} &bull; &copy; ${year} Disruptive Business Solution LLC`;
-    }
-
-    document.addEventListener("DOMContentLoaded", () => {
-      updateAll();
-      setInterval(updateAll, 5 * 60 * 1000);
-    });
-  </script>
-</body>
-</html>
+      return data.status
