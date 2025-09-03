@@ -34,6 +34,7 @@
     .item a:hover{text-decoration:underline}
     .item p{margin:6px 0 0;color:var(--muted);font-size:.92rem;line-height:1.35}
     .loading{text-align:center;padding:14px;color:var(--muted);line-height:1.4;}
+    .smallnote{margin-top:8px;color:#8a8f98;font-size:.8rem}
     .footer{margin:16px auto 0;text-align:center;color:#8a8f98;font-size:.85rem;max-width:1400px}
   </style>
 </head>
@@ -59,7 +60,9 @@
     <div class="card" id="recommended-card">
       <h2>Recommended Reading</h2>
       <div class="list"><div class="loading">Loading…</div></div>
+      <div class="smallnote" data-stamp></div>
     </div>
+
     <div class="card" id="cerf-card">
       <h2>The Cerf Report</h2>
       <div class="section-link">
@@ -68,22 +71,31 @@
         </a>
       </div>
       <div class="list"><div class="loading">Loading…</div></div>
+      <div class="smallnote" data-stamp></div>
     </div>
+
     <div class="card" id="front-card">
       <h2>Front Page</h2>
       <div class="list"><div class="loading">Loading…</div></div>
+      <div class="smallnote" data-stamp></div>
     </div>
+
     <div class="card" id="tech-card">
       <h2>Technology</h2>
       <div class="list"><div class="loading">Loading…</div></div>
+      <div class="smallnote" data-stamp></div>
     </div>
+
     <div class="card" id="world-card">
       <h2>World News</h2>
       <div class="list"><div class="loading">Loading…</div></div>
+      <div class="smallnote" data-stamp></div>
     </div>
+
     <div class="card" id="finance-card">
       <h2>Finance</h2>
       <div class="list"><div class="loading">Loading…</div></div>
+      <div class="smallnote" data-stamp></div>
     </div>
   </div>
 
@@ -101,44 +113,61 @@
         : Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
 
+    // Stronger fetch: logs body on failures & bad JSON
     async function fetchJSON(url){
       const r = await fetch(url, { redirect: "follow" });
-      if(!r.ok) throw new Error("HTTP " + r.status);
-      return r.json();
+      const text = await r.text(); // read once for better error logs
+      if (!r.ok) {
+        console.error("Fetch failed:", url, r.status, text.slice(0, 400));
+        throw new Error(`HTTP ${r.status}`);
+      }
+      try { return JSON.parse(text); }
+      catch (e) {
+        console.error("Invalid JSON from:", url, text.slice(0, 400));
+        throw new Error("Invalid JSON");
+      }
     }
 
-    function renderNewsList(listEl, articles){
-      if(!articles || !articles.length){
-        if (listEl.innerHTML.includes('loading')) {
-          listEl.innerHTML = '<div class="loading">Could not load news at this time.</div>';
-        }
+    function renderNewsList(listEl, articles, errText = "Could not load news at this time."){
+      if (!Array.isArray(articles) || articles.length === 0){
+        listEl.innerHTML = `<div class="loading">${errText}</div>`;
         return;
       }
       listEl.innerHTML = "";
-      for(const a of articles){
-        if(!a || !a.title) continue;
+      for (const a of articles){
+        if (!a || !a.title) continue;
         const div = document.createElement("div");
         div.className = "item";
+        const desc = a.description ? a.description : "";
         div.innerHTML = `<a href="${a.url}" target="_blank" rel="noopener noreferrer">${a.title}</a>
-                         <p>${a.description ? a.description : ""}</p>`;
+                         <p>${desc}</p>`;
         listEl.appendChild(div);
       }
     }
 
+    function stamp(cardEl){
+      const s = cardEl.querySelector('[data-stamp]');
+      if (s) s.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+    }
+
     async function fetchNews(section){
       const data = await fetchJSON(ABS("/.netlify/functions/news?section=" + encodeURIComponent(section)));
-      return data && data.status === "ok" ? (data.articles || null) : null;
+      return (data && data.status === "ok") ? (data.articles || []) : [];
     }
 
     async function fetchCerf(){
       const data = await fetchJSON(ABS("/.netlify/functions/substack?mode=archive"));
-      if(!data || data.status !== "ok" || !Array.isArray(data.articles)) return null;
-      return data.articles.map(a=>({ title:a.title||"Untitled", url:a.url, description:a.description||"" }));
+      if (!data || data.status !== "ok" || !Array.isArray(data.articles)) return [];
+      return data.articles.map(a => ({
+        title: a.title || "Untitled",
+        url: a.url,
+        description: a.description || ""
+      }));
     }
 
     async function fetchRecommended(){
       const data = await fetchJSON(ABS("/.netlify/functions/get-links"));
-      return data && data.status === "ok" ? (data.articles || null) : null;
+      return (data && data.status === "ok") ? (data.articles || []) : [];
     }
 
     async function fetchMiniMarket(){
@@ -160,24 +189,40 @@
         setPrice("price-xau", null);
       }
 
-      // News
-      try{
-        const sections = [
-          { id: "front-card",   section: "frontpage" },
-          { id: "tech-card",    section: "tech" },
-          { id: "world-card",   section: "world" },
-          { id: "finance-card", section: "finance" }
-        ];
+      // Sections config
+      const sections = [
+        { id: "front-card",   section: "frontpage", label: "Front Page" },
+        { id: "tech-card",    section: "tech",      label: "Technology" },
+        { id: "world-card",   section: "world",     label: "World News" },
+        { id: "finance-card", section: "finance",   label: "Finance" }
+      ];
 
+      try{
         const results = await Promise.all([
-          fetchRecommended().catch(()=>null),
-          ...sections.map(s => fetchNews(s.section).catch(()=>null)),
-          fetchCerf().catch(()=>null)
+          fetchRecommended().catch(e => ({__err:e})),
+          ...sections.map(s => fetchNews(s.section).catch(e => ({__err:e}))),
+          fetchCerf().catch(e => ({__err:e}))
         ]);
 
-        renderNewsList($("#recommended-card .list"), results[0]);
-        sections.forEach((s, i) => renderNewsList($(`#${s.id} .list`), results[i+1]));
-        renderNewsList($("#cerf-card .list"), results[sections.length+1]);
+        // Recommended
+        const recTarget = $("#recommended-card .list");
+        const recData = results[0];
+        renderNewsList(recTarget, recData.__err ? [] : recData, "Could not load recommended links.");
+        stamp($("#recommended-card"));
+
+        // Sectioned news
+        sections.forEach((s, i) => {
+          const res = results[i+1];
+          const el = $(`#${s.id} .list`);
+          renderNewsList(el, res.__err ? [] : res, `Could not load ${s.label}.`);
+          stamp($(`#${s.id}`));
+        });
+
+        // The Cerf Report (Substack)
+        const cerfRes = results[sections.length+1];
+        renderNewsList($("#cerf-card .list"), cerfRes.__err ? [] : cerfRes, "Could not load The Cerf Report.");
+        stamp($("#cerf-card"));
+
       }catch(e){
         console.error("News update error:", e);
       }
@@ -188,6 +233,7 @@
 
     document.addEventListener("DOMContentLoaded", () => {
       updateAll();
+      // Periodic refresh
       setInterval(updateAll, 5 * 60 * 1000);
     });
   </script>
