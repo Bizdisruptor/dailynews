@@ -1,11 +1,21 @@
 [build]
-  publish = "."
+  publish   = "."
   functions = "netlify/functions"
 
-# ---------- Redirect EVERYTHING on Netlify hosts to the apex ----------
+[functions]
+  node_bundler = "esbuild"   # good default; works with CommonJS or ESM
+
+# --- keep functions on Netlify hosts (do NOT redirect these) ---
+[[redirects]]
+  from = "/.netlify/functions/*"
+  to   = "/.netlify/functions/:splat"
+  status = 200
+  conditions = { Host = ["cerfreportnews.netlify.app", "*--cerfreportnews.netlify.app"] }
+
+# --- redirect everything else on netlify.app to the apex ---
 [[redirects]]
   from = "/*"
-  to = "https://thecerfreport.com/:splat"
+  to   = "https://thecerfreport.com/:splat"
   status = 301
   force = true
   conditions = { Host = ["cerfreportnews.netlify.app", "*--cerfreportnews.netlify.app"] }
