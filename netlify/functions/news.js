@@ -1,43 +1,37 @@
-// netlify/functions/news.js
-// Robust news endpoint with RSS fallback, optional APIs, ETag/304 + cooldown.
-// Works on Node 18+ (Netlify runtime). No JSX-like literals anywhere.
+// netlify/functions/news.js (CommonJS)
+// RSS-first, optional APIs, ETag/304, cooldown, no JSX-like regex.
 
-import fs from "fs";
+const fs = require("fs");
 
-// -------- Config --------
+// ---- config
 const HEADERS = { "content-type": "application/json; charset=utf-8", "access-control-allow-origin": "*" };
 const CACHE_DIR = "/tmp";
 const DEFAULT_SECTION = "frontpage";
-const PROVIDERS_BY_SECTION = {
+const MAP = {
   frontpage: ["rss", "newsapi", "gnews", "newsdata"],
   world:     ["rss", "newsapi", "gnews", "newsdata"],
   tech:      ["rss", "newsapi", "gnews", "newsdata"],
   finance:   ["rss", "newsapi", "gnews", "finnhub"],
 };
-const COOLDOWN_MS = 5 * 60 * 1000; // don’t hit upstream more than once per 5 min per section
+const COOLDOWN_MS = 5 * 60 * 1000;
 const TIMEOUT_MS  = 7000;
 
-// -------- Handler --------
-export const handler = async (event) => {
-  const sectionRaw = (event?.queryStringParameters?.section || DEFAULT_SECTION).toLowerCase().trim();
-  const section = Object.prototype.hasOwnProperty.call(PROVIDERS_BY_SECTION, sectionRaw) ? sectionRaw : DEFAULT_SECTION;
+module.exports.handler = async (event) => {
+  const raw = (event?.queryStringParameters?.section || DEFAULT_SECTION).toLowerCase().trim();
+  const section = Object.prototype.hasOwnProperty.call(MAP, raw) ? raw : DEFAULT_SECTION;
 
-  const cache = readCache(section); // { articles, etag, updatedAt, lastTriedAt }
+  const cache = readCache(section); // {articles, etag, updatedAt, lastTriedAt}
   const clientETag = event?.headers?.["if-none-match"] || event?.headers?.["If-None-Match"];
 
-  // If client has our current ETag and we’re inside cooldown → 304
   if (cache?.etag && clientETag === cache.etag && withinCooldown(cache)) {
     return { statusCode: 304, headers: { ETag: cache.etag, ...HEADERS } };
   }
-
-  // If inside cooldown but no matching ETag, just serve cache now
   if (withinCooldown(cache) && cache?.articles?.length) {
     return jsonWithETag({ status: "ok", articles: cache.articles, source: "cache" }, cache.etag);
   }
 
-  // Try providers in order (RSS first so it works without keys)
   let got = null;
-  const providers = PROVIDERS_BY_SECTION[section] || ["rss"];
+  const providers = MAP[section] || ["rss"];
   for (const p of providers) {
     try {
       if (p === "newsapi"  && !process.env.NEWSAPI_KEY) continue;
@@ -46,10 +40,10 @@ export const handler = async (event) => {
       if (p === "finnhub"  && !process.env.FINNHUB_API_KEY) continue;
 
       const articles = await withTimeout((signal) => PROVIDERS[p](section, { signal }), TIMEOUT_MS);
-      const cleaned  = sanitizeArticles(articles);
+      const cleaned = sanitizeArticles(articles);
       if (cleaned.length) { got = { articles: cleaned, source: p }; break; }
     } catch (e) {
-      console.warn(`[news][${section}] provider ${p} failed:`, e?.message || e);
+      console.warn(`[news][${section}] ${p} failed:`, e?.message || e);
     }
   }
 
@@ -61,7 +55,6 @@ export const handler = async (event) => {
     return jsonWithETag({ status: "ok", articles: got.articles, source: got.source }, etag);
   }
 
-  // Fall back to cache or error
   if (cache?.articles?.length) {
     if (clientETag && cache.etag && clientETag === cache.etag) {
       return { statusCode: 304, headers: { ETag: cache.etag, ...HEADERS } };
@@ -72,7 +65,7 @@ export const handler = async (event) => {
   return json({ status: "error", message: "No news available." }, 502);
 };
 
-// -------- Providers --------
+// ---- providers
 const PROVIDERS = {
   async rss(section, { signal } = {}) {
     const feeds = pickRSS(section);
@@ -83,9 +76,7 @@ const PROVIDERS = {
         if (!res.ok) continue;
         const xml = await res.text();
         all.push(...parseRSS(xml));
-      } catch (e) {
-        console.warn(`[rss] ${url} failed:`, e?.message || e);
-      }
+      } catch (e) { console.warn(`[rss] ${url} failed:`, e?.message || e); }
     }
     return all.map(a => norm(a.title, a.url, a.source, a.summary, a.ts));
   },
@@ -140,7 +131,7 @@ const PROVIDERS = {
   },
 };
 
-// -------- RSS helpers (JSX-safe) --------
+// ---- RSS helpers
 function pickRSS(section) {
   const feeds = {
     frontpage: [
@@ -167,11 +158,105 @@ function pickRSS(section) {
 
 function parseRSS(xml) {
   const out = [];
-  // Build regex with strings (no JSX-like literals)
   const itemRe  = new RegExp("<item[\\s\\S]*?<\\/item>", "gi");
   const entryRe = new RegExp("<entry[\\s\\S]*?<\\/entry>", "gi");
   const blocks = xml.match(itemRe) || xml.match(entryRe) || [];
   for (const b of blocks) {
     const title = grabTag(b, "title");
     let link = grabTag(b, "link");
-    if (!link) link = grabAttr(b, "link", "href") || grabAttr(b, "link", "rel=\"alternate\
+    if (!link) link = grabAttr(b, "link", "href") || grabAttr(b, "link", "rel=\"alternate\" href");
+    const desc = grabTag(b, "description") || grabTag(b, "summary") || "";
+    const pub  = grabTag(b, "pubDate") || grabTag(b, "updated") || grabTag(b, "published") || "";
+    if (title && link) {
+      const summary = stripHTML(decode(desc)).slice(0, 280);
+      out.push({ title: decode(title), url: link, source: host(link), summary, ts: toISO(pub) });
+    }
+  }
+  return out;
+}
+function grabTag(block, tag) {
+  const re = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i");
+  const m = block.match(re);
+  return m ? m[1].trim() : "";
+}
+function grabAttr(block, tag, attr) {
+  const re = new RegExp(`<${tag}[^>]*${attr}=["']([^"']+)["'][^>]*>`, "i");
+  const m = block.match(re);
+  return m ? m[1].trim() : "";
+}
+
+// ---- utils
+function norm(title, url, source, summary, ts) {
+  if (!title || !url) return null;
+  return {
+    title: String(title).trim(),
+    url: String(url).trim(),
+    source: source ? String(source).trim() : host(url),
+    description: (summary || "").toString().trim(),
+    publishedAt: toISO(ts),
+  };
+}
+function toISO(t) {
+  if (!t) return new Date().toISOString();
+  const d = typeof t === "number" ? new Date(t) : new Date(String(t));
+  return isNaN(d) ? new Date().toISOString() : d.toISOString();
+}
+function host(u) { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return ""; } }
+function stripHTML(s = "") { return s.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(); }
+function decode(s = "") {
+  return s.replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"').replace(/&#39;/g,"'");
+}
+
+function cachePath(section) { return `${CACHE_DIR}/cerf-news-${section}.json`; }
+function readCache(section) {
+  try {
+    if (!fs.existsSync(cachePath(section))) return null;
+    const raw = JSON.parse(fs.readFileSync(cachePath(section), "utf8"));
+    raw.articles = sanitizeArticles(raw.articles || []);
+    return raw;
+  } catch { return null; }
+}
+function writeCache(section, articles, etag) {
+  try {
+    const meta = { articles: sanitizeArticles(articles), etag, updatedAt: Date.now(), lastTriedAt: Date.now() };
+    fs.writeFileSync(cachePath(section), JSON.stringify(meta));
+  } catch {}
+}
+function touchLastTried(section) {
+  try {
+    const m = readCache(section) || { articles: [], etag: "", updatedAt: 0, lastTriedAt: 0 };
+    m.lastTriedAt = Date.now();
+    fs.writeFileSync(cachePath(section), JSON.stringify(m));
+  } catch {}
+}
+function withinCooldown(cache) { return !!cache && (Date.now() - (cache.lastTriedAt || 0) < COOLDOWN_MS); }
+function makeETag(articles) {
+  const s = JSON.stringify(sanitizeArticles(articles));
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return `"W/${h.toString(16)}-${s.length}"`;
+}
+function sanitizeArticles(arr) {
+  const list = (Array.isArray(arr) ? arr : [])
+    .filter(Boolean).filter(a => a?.title && a?.url)
+    .map(a => ({ ...a, description: (a.description || "").toString().trim(), publishedAt: toISO(a.publishedAt), source: a.source || host(a.url) }));
+  const seen = new Set(), out = [];
+  for (const it of list) {
+    const k = (it.url || "").split("#")[0];
+    if (!k || seen.has(k)) continue;
+    seen.add(k); out.push(it);
+  }
+  out.sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt));
+  return out;
+}
+function json(body, status = 200, extra = {}) {
+  return { statusCode: status, headers: { ...HEADERS, ...extra }, body: JSON.stringify(body) };
+}
+function jsonWithETag(body, etag) { return json(body, 200, { ETag: etag || "" }); }
+function withTimeout(run, ms) {
+  return new Promise((resolve, reject) => {
+    const ctrl = new AbortController();
+    const id = setTimeout(() => { ctrl.abort(); reject(new Error("timeout")); }, ms);
+    Promise.resolve(run(ctrl.signal)).then(resolve).catch(reject).finally(() => clearTimeout(id));
+  });
+}
