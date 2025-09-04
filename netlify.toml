@@ -3,33 +3,34 @@
   functions = "netlify/functions"
 
 [functions]
-  node_bundler = "esbuild"   # good default; works with CommonJS or ESM
+  node_bundler = "esbuild"
 
-# --- keep functions working on netlify hosts ---
+# --- Let serverless functions run (no redirect) on ALL hosts ---
 [[redirects]]
   from = "/.netlify/functions/*"
   to   = "/.netlify/functions/:splat"
   status = 200
-  conditions = { Host = ["cerfreportnews.netlify.app", "*--cerfreportnews.netlify.app"] }
 
-# --- redirect everything else on netlify.app to apex ---
+# --- Redirect the primary Netlify subdomain to the apex ---
 [[redirects]]
-  from = "/*"
+  from = "https://cerfreportnews.netlify.app/*"
   to   = "https://thecerfreport.com/:splat"
   status = 301
   force = true
-  conditions = { Host = ["cerfreportnews.netlify.app", "*--cerfreportnews.netlify.app"] }
+
+# --- Redirect deploy preview subdomains to the apex ---
+# (matches URLs like https://deploy-preview-123--cerfreportnews.netlify.app/...)
+[[redirects]]
+  from = "https://*--cerfreportnews.netlify.app/*"
+  to   = "https://thecerfreport.com/:splat"
+  status = 301
+  force = true
 
 # ---------- Headers ----------
+# NOTE: Netlify's headers in TOML don't support host conditions.
+# If you need host-specific headers, keep them simple or apply via your CDN/DNS.
 [[headers]]
   for = "/*"
-  conditions = { Host = ["thecerfreport.com", "www.thecerfreport.com"] }
   [headers.values]
   X-Robots-Tag = "all"
-  Strict-Transport-Security = "max-age=31536000; includeSubDomains; preload"
-
-[[headers]]
-  for = "/*"
-  conditions = { Host = ["cerfreportnews.netlify.app", "*--cerfreportnews.netlify.app"] }
-  [headers.values]
-  X-Robots-Tag = "noindex"
+  Strict-Transport-Security = "max-age=31536000; includeSubDomains; prel
