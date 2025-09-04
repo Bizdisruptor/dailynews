@@ -150,11 +150,57 @@
       if (s) s.textContent = `Updated ${new Date().toLocaleTimeString()}`;
     }
 
-    async function fetchNews(section){
-      const data = await fetchJSON(ABS("/.netlify/functions/news?section=" + encodeURIComponent(section)));
-      return (data && data.status === "ok") ? (data.articles || []) : [];
+    // ---- ETag-aware news fetch (with first-load fallback) ----
+    const sectionDefs = [
+      { id: "front-card",   section: "frontpage", label: "Front Page" },
+      { id: "tech-card",    section: "tech",      label: "Technology" },
+      { id: "world-card",   section: "world",     label: "World News" },
+      { id: "finance-card", section: "finance",   label: "Finance" }
+    ];
+    const etagKey = (section) => `news-etag-${section}`;
+
+    async function fetchNewsRaw(section, useETag = true){
+      const url = ABS("/.netlify/functions/news?section=" + encodeURIComponent(section));
+      const headers = {};
+      if (useETag) {
+        const et = localStorage.getItem(etagKey(section));
+        if (et) headers["If-None-Match"] = et;
+      }
+      return fetch(url, { headers, redirect: "follow" });
     }
 
+    async function loadSection({ id, section, label }){
+      const listEl = document.querySelector(`#${id} .list`);
+
+      // 1) Try with ETag (if present)
+      let r = await fetchNewsRaw(section, true);
+
+      // 2) If 304 but the card is empty (first paint), immediately refetch w/o ETag to get cached body
+      if (r.status === 304 && (!listEl || listEl.children.length === 0)) {
+        r = await fetchNewsRaw(section, false);
+      }
+
+      if (r.status === 304) {
+        // Not modified and DOM already has content → keep as-is
+        return;
+      }
+
+      if (!r.ok) {
+        if (!listEl || !listEl.children.length) {
+          renderNewsList(listEl, [], `Could not load ${label}.`);
+        }
+        return;
+      }
+
+      const et = r.headers.get("etag");
+      if (et) localStorage.setItem(etagKey(section), et);
+
+      const data = await r.json();
+      renderNewsList(listEl, Array.isArray(data.articles) ? data.articles : [], `Could not load ${label}.`);
+      stamp(document.getElementById(id));
+    }
+
+    // ---- other data sources (no ETag logic needed here) ----
     async function fetchCerf(){
       const data = await fetchJSON(ABS("/.netlify/functions/substack?mode=archive"));
       if (!data || data.status !== "ok" || !Array.isArray(data.articles)) return [];
@@ -178,7 +224,7 @@
 
     // -------- main update --------
     async function updateAll(){
-      // Minimal market: server-side, non-blocking
+      // Minimal market
       try {
         const mm = await fetchMiniMarket();
         setPrice("price-btc", mm.btcUSD);
@@ -189,43 +235,23 @@
         setPrice("price-xau", null);
       }
 
-      // Sections config
-      const sections = [
-        { id: "front-card",   section: "frontpage", label: "Front Page" },
-        { id: "tech-card",    section: "tech",      label: "Technology" },
-        { id: "world-card",   section: "world",     label: "World News" },
-        { id: "finance-card", section: "finance",   label: "Finance" }
-      ];
-
+      // Recommended + Cerf (simple)
       try{
-        const results = await Promise.all([
-          fetchRecommended().catch(e => ({__err:e})),
-          ...sections.map(s => fetchNews(s.section).catch(e => ({__err:e}))),
-          fetchCerf().catch(e => ({__err:e}))
+        const [recs, cerf] = await Promise.all([
+          fetchRecommended().catch(()=>[]),
+          fetchCerf().catch(()=>[])
         ]);
-
-        // Recommended
-        const recTarget = $("#recommended-card .list");
-        const recData = results[0];
-        renderNewsList(recTarget, recData.__err ? [] : recData, "Could not load recommended links.");
+        renderNewsList($("#recommended-card .list"), recs, "Could not load recommended links.");
         stamp($("#recommended-card"));
 
-        // Sectioned news
-        sections.forEach((s, i) => {
-          const res = results[i+1];
-          const el = $(`#${s.id} .list`);
-          renderNewsList(el, res.__err ? [] : res, `Could not load ${s.label}.`);
-          stamp($(`#${s.id}`));
-        });
-
-        // The Cerf Report (Substack)
-        const cerfRes = results[sections.length+1];
-        renderNewsList($("#cerf-card .list"), cerfRes.__err ? [] : cerfRes, "Could not load The Cerf Report.");
+        renderNewsList($("#cerf-card .list"), cerf, "Could not load The Cerf Report.");
         stamp($("#cerf-card"));
-
       }catch(e){
-        console.error("News update error:", e);
+        console.error("Side lists update error:", e);
       }
+
+      // ETag-aware sections (Front, Tech, World, Finance)
+      await Promise.all(sectionDefs.map(loadSection));
 
       const year = new Date().getFullYear();
       $("#updatedAt").textContent = `Updated ${new Date().toLocaleString()} • © ${year} Disruptive Business Solution LLC`;
@@ -233,7 +259,6 @@
 
     document.addEventListener("DOMContentLoaded", () => {
       updateAll();
-      // Periodic refresh
       setInterval(updateAll, 5 * 60 * 1000);
     });
   </script>
