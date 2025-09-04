@@ -1,6 +1,6 @@
 // netlify/functions/mini-market.js
-// Returns { btcUSD, xauUSD } with no API keys, cache 60s, ?force=1.
-// BTC: Binance (US). XAU: exchangerate.host (invert) -> exchangerate.host convert -> goldprice.org fallback.
+// Returns { btcUSD, xauUSD } with timestamps in meta, cache 60s, ?force=1.
+// BTC: Binance 24h ticker (has closeTime). XAU: exchangerate.host (invert)->convert->goldprice.
 
 const fs = require("fs");
 
@@ -22,35 +22,28 @@ function fetchWithTimeout(url, opts = {}, ms = FETCH_TIMEOUT_MS) {
     .finally(() => clearTimeout(id));
 }
 
-function readCache() {
-  try {
-    if (fs.existsSync(CACHE_FILE)) {
-      return JSON.parse(fs.readFileSync(CACHE_FILE, "utf8"));
-    }
-  } catch {}
-  return null;
-}
-function writeCache(payload) {
-  try {
-    fs.writeFileSync(CACHE_FILE, JSON.stringify({ ts: Date.now(), payload }));
-  } catch {}
-}
+function readCache() { try { if (fs.existsSync(CACHE_FILE)) return JSON.parse(fs.readFileSync(CACHE_FILE,"utf8")); } catch {} return null; }
+function writeCache(payload) { try { fs.writeFileSync(CACHE_FILE, JSON.stringify({ ts: Date.now(), payload })); } catch {} }
 
-// --- BTC from Binance (no key) ---
+// ---------- BTC (Binance 24hr ticker) ----------
 async function getBTC() {
-  const url = "https://api.binance.us/api/v3/ticker/price?symbol=BTCUSD";
+  // Example: https://api.binance.us/api/v3/ticker/24hr?symbol=BTCUSD
+  const url = "https://api.binance.us/api/v3/ticker/24hr?symbol=BTCUSD";
   const r = await fetchWithTimeout(url);
   if (!r.ok) throw new Error(`binance HTTP ${r.status}`);
   const ct = (r.headers.get("content-type") || "").toLowerCase();
   const text = await r.text();
   if (!ct.includes("application/json")) throw new Error(`binance non-JSON: ${text.slice(0,80)}`);
   const j = JSON.parse(text);
-  const p = Number(j?.price);
+
+  // lastPrice + closeTime (ms since epoch)
+  const p = Number(j?.lastPrice ?? j?.lastPrice?.price ?? j?.lastPrice?.value);
+  const ts = Number(j?.closeTime ?? Date.now());
   if (!isFinite(p)) throw new Error("binance missing price");
-  return p;
+  return { price: p, ts, source: "binance" };
 }
 
-// --- helpers: safe JSON fetch that detects HTML blocks ---
+// ---------- helpers for safe JSON ----------
 async function getJsonOrThrow(url, name) {
   const r = await fetchWithTimeout(url);
   if (!r.ok) throw new Error(`${name} HTTP ${r.status}`);
@@ -63,42 +56,32 @@ async function getJsonOrThrow(url, name) {
   catch (e) { throw new Error(`${name} bad JSON: ${text.slice(0,80)}`); }
 }
 
-// --- XAU #1: exchangerate.host latest (USD->XAU inverted) ---
+// ---------- XAU (exchangerate.host latest -> convert -> goldprice) ----------
 async function xauFromExHostLatest() {
   const j = await getJsonOrThrow("https://api.exchangerate.host/latest?base=USD&symbols=XAU&_ts=" + Date.now(), "exchangerate.latest");
   const rateXAUperUSD = j?.rates?.XAU; // XAU per 1 USD
   if (typeof rateXAUperUSD !== "number" || rateXAUperUSD === 0) throw new Error("latest missing/zero XAU");
   const usdPerXAU = 1 / rateXAUperUSD;
-  if (!isFinite(usdPerXAU)) throw new Error("latest inversion invalid");
-  return usdPerXAU;
+  return { price: usdPerXAU, ts: Date.now(), source: "exchangerate.latest" };
 }
 
-// --- XAU #2: exchangerate.host convert (XAU->USD) ---
 async function xauFromExHostConvert() {
   const j = await getJsonOrThrow("https://api.exchangerate.host/convert?from=XAU&to=USD&_ts=" + Date.now(), "exchangerate.convert");
   const p = j?.result;
   if (typeof p !== "number") throw new Error("convert missing result");
-  return p;
+  return { price: p, ts: Date.now(), source: "exchangerate.convert" };
 }
 
-// --- XAU #3: goldprice.org (unofficial JSON, but stable server-side) ---
 async function xauFromGoldprice() {
-  // This endpoint returns JSON like:
-  // {"items":[{"curr":"USD","xauPrice":***, ...}]}
+  // https://data-asg.goldprice.org/dbXRates/USD
   const j = await getJsonOrThrow("https://data-asg.goldprice.org/dbXRates/USD?_ts=" + Date.now(), "goldprice");
-  let p;
   if (j && Array.isArray(j.items) && j.items[0]) {
     const it = j.items[0];
-    // Prefer explicit xauPrice if present, else compute from inverse (if provided)
-    if (typeof it.xauPrice === "number") p = it.xauPrice;
-    else if (typeof it.xau !== "undefined") {
-      // sometimes xau is given; ensure it's USD per XAU
-      const v = Number(it.xau);
-      if (isFinite(v) && v > 0) p = v;
-    }
+    const p = typeof it.xauPrice === "number" ? it.xauPrice : Number(it.xau);
+    const ts = Number(it.ts || it.timestamp || Date.now());
+    if (isFinite(p)) return { price: p, ts: isFinite(ts) ? ts : Date.now(), source: "goldprice" };
   }
-  if (!isFinite(p)) throw new Error("goldprice parse failed");
-  return p;
+  throw new Error("goldprice parse failed");
 }
 
 async function getXAU() {
@@ -108,7 +91,7 @@ async function getXAU() {
     try { return await xauFromExHostConvert(); }
     catch (e2) {
       console.warn("XAU secondary failed:", e2.message);
-      return await xauFromGoldprice(); // may still be blocked sometimes, but server-side usually ok
+      return await xauFromGoldprice();
     }
   }
 }
@@ -122,20 +105,28 @@ exports.handler = async (event) => {
     }
 
     const [btcRes, xauRes] = await Promise.allSettled([ getBTC(), getXAU() ]);
+
     const data = { btcUSD: null, xauUSD: null };
+    const meta = {};
     const errors = {};
 
-    if (btcRes.status === "fulfilled") data.btcUSD = btcRes.value;
-    else errors.BTCUSD = String(btcRes.reason?.message || btcRes.reason || "unknown");
-
-    if (xauRes.status === "fulfilled") data.xauUSD = xauRes.value;
-    else errors.XAUUSD = String(xauRes.reason?.message || xauRes.reason || "unknown");
-
-    if (!data.btcUSD && !data.xauUSD) {
-      throw new Error(`both quotes failed: ${JSON.stringify(errors)}`);
+    if (btcRes.status === "fulfilled") {
+      data.btcUSD = btcRes.value.price;
+      meta.BTCUSD = { source: btcRes.value.source, ts: btcRes.value.ts };
+    } else {
+      errors.BTCUSD = String(btcRes.reason?.message || btcRes.reason || "unknown");
     }
 
-    const payload = { status: "ok", data, ...(Object.keys(errors).length ? { errors } : {}) };
+    if (xauRes.status === "fulfilled") {
+      data.xauUSD = xauRes.value.price;
+      meta.XAUUSD = { source: xauRes.value.source, ts: xauRes.value.ts };
+    } else {
+      errors.XAUUSD = String(xauRes.reason?.message || xauRes.reason || "unknown");
+    }
+
+    if (!data.btcUSD && !data.xauUSD) throw new Error(`both quotes failed: ${JSON.stringify(errors)}`);
+
+    const payload = { status: "ok", data, ...(Object.keys(meta).length ? { meta } : {}), ...(Object.keys(errors).length ? { errors } : {}) };
     writeCache(payload);
     return { statusCode: 200, headers: HEADERS, body: JSON.stringify(payload) };
   } catch (e) {
