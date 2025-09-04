@@ -9,24 +9,38 @@
     * { box-sizing:border-box; }
     body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink);margin:0;padding:0}
 
-    /* Banner as CSS background, tagline at bottom */
-    header {
-      background-image:url('The%20Cerf%20Report.png');
-      background-size:cover;
-      background-position:center;
-      height:220px;
-      display:flex;
-      align-items:flex-end;       /* push content to bottom */
-      justify-content:center;
-      text-align:center;
-      color:white;
-      padding:0 12px 10px;
+    /* Responsive banner */
+    header.banner {
+      width: 100%;
+      height: 220px; /* desktop default */
+      background: url("The%20Cerf%20Report.png") no-repeat center center;
+      background-size: cover;
+      position: relative;
     }
-    header .subhead {
-      font-size:1rem;
-      padding:6px 12px;
-      background:rgba(0,0,0,0.55); /* readable on any art */
-      border-radius:6px;
+    .banner-text {
+      position: absolute;
+      bottom: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 1rem;
+      font-weight: 600;
+      color: #fff;
+      background: rgba(0,0,0,0.55);
+      padding: 6px 12px;
+      border-radius: 6px;
+      text-align: center;
+      white-space: nowrap;
+      max-width: 94%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    @media (max-width: 768px) {
+      header.banner { height: 160px; background-position: center top; }
+      .banner-text { font-size: .95rem; padding: 5px 10px; }
+    }
+    @media (max-width: 480px) {
+      header.banner { height: 130px; }
+      .banner-text { font-size: .9rem; padding: 4px 9px; }
     }
 
     .market {
@@ -52,249 +66,4 @@
     .item a:hover{text-decoration:underline}
     .item p{margin:6px 0 0;color:var(--muted);font-size:.92rem;line-height:1.35}
     .loading{text-align:center;padding:14px;color:var(--muted);line-height:1.4;}
-    .smallnote{margin-top:8px;color:#8a8f98;font-size:.8rem}
-    .footer{margin:16px auto 0;text-align:center;color:#8a8f98;font-size:.85rem;max-width:1400px}
-  </style>
-</head>
-<body>
-  <header>
-    <div class="subhead">Curated News — news minus the junk.</div>
-  </header>
-
-  <!-- Simple Market: Bitcoin + Gold only (links to Google Finance) -->
-  <div class="market">
-    <div class="row" id="simple-market">
-      <div class="chip" id="price-btc">
-        <a href="https://www.google.com/finance/quote/BTC-USD" target="_blank" rel="noopener">Bitcoin (BTC)</a>
-        <span class="price">—</span>
-      </div>
-      <div class="chip" id="price-xau">
-        <a href="https://www.google.com/finance/quote/XAU-USD" target="_blank" rel="noopener">Gold (XAU)</a>
-        <span class="price">—</span>
-      </div>
-    </div>
-  </div>
-
-  <div class="grid">
-    <div class="card" id="recommended-card">
-      <h2>Recommended Reading</h2>
-      <div class="list"><div class="loading">Loading…</div></div>
-      <div class="smallnote" data-stamp></div>
-    </div>
-
-    <div class="card" id="cerf-card">
-      <h2>The Cerf Report</h2>
-      <div class="section-link">
-        <a href="https://thecerfreport.substack.com/" target="_blank" rel="noopener noreferrer">
-          thecerfreport.substack.com →
-        </a>
-      </div>
-      <div class="list"><div class="loading">Loading…</div></div>
-      <div class="smallnote" data-stamp></div>
-    </div>
-
-    <div class="card" id="front-card">
-      <h2>Front Page</h2>
-      <div class="list"><div class="loading">Loading…</div></div>
-      <div class="smallnote" data-stamp></div>
-    </div>
-
-    <div class="card" id="tech-card">
-      <h2>Technology</h2>
-      <div class="list"><div class="loading">Loading…</div></div>
-      <div class="smallnote" data-stamp></div>
-    </div>
-
-    <div class="card" id="world-card">
-      <h2>World News</h2>
-      <div class="list"><div class="loading">Loading…</div></div>
-      <div class="smallnote" data-stamp></div>
-    </div>
-
-    <div class="card" id="finance-card">
-      <h2>Finance</h2>
-      <div class="list"><div class="loading">Loading…</div></div>
-      <div class="smallnote" data-stamp></div>
-    </div>
-  </div>
-
-  <div class="footer" id="updatedAt"></div>
-
-  <script>
-    // -------- helpers --------
-    const ABS = (path) => new URL(path, location.origin).toString();
-    const $ = (sel, root=document) => root.querySelector(sel);
-
-    function setPrice(elId, value){
-      const el = document.querySelector(`#${elId} .price`);
-      el.textContent = (value == null)
-        ? "—"
-        : Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    }
-
-    // Decode HTML entities & strip RSS CDATA
-    function decodeEntities(str=""){
-      const d = document.createElement("textarea");
-      d.innerHTML = str;
-      return d.value.replace(/^<!\[CDATA\[/, "").replace(/\]\]>$/, "");
-    }
-
-    // Stronger fetch: logs body on failures & bad JSON
-    async function fetchJSON(url){
-      const r = await fetch(url, { redirect: "follow" });
-      const text = await r.text();
-      if (!r.ok) {
-        console.error("Fetch failed:", url, r.status, text.slice(0, 400));
-        throw new Error(`HTTP ${r.status}`);
-      }
-      try { return JSON.parse(text); }
-      catch (e) {
-        console.error("Invalid JSON from:", url, text.slice(0, 400));
-        throw new Error("Invalid JSON");
-      }
-    }
-
-    function renderNewsList(listEl, articles, errText = "Could not load news at this time."){
-      if (!Array.isArray(articles) || articles.length === 0){
-        listEl.innerHTML = `<div class="loading">${errText}</div>`;
-        return;
-      }
-      listEl.innerHTML = "";
-      for (const a of articles){
-        if (!a || !a.title) continue;
-        const div = document.createElement("div");
-        div.className = "item";
-        const desc = a.description ? decodeEntities(a.description) : "";
-        div.innerHTML = `<a href="${a.url}" target="_blank" rel="noopener noreferrer">${decodeEntities(a.title)}</a>
-                         <p>${desc}</p>`;
-        listEl.appendChild(div);
-      }
-    }
-
-    function stamp(cardEl){
-      const s = cardEl.querySelector('[data-stamp]');
-      if (s) s.textContent = `Updated ${new Date().toLocaleTimeString()}`;
-    }
-
-    // ---- ETag-aware news fetch with proper first-paint detection ----
-    const sectionDefs = [
-      { id: "front-card",   section: "frontpage", label: "Front Page" },
-      { id: "tech-card",    section: "tech",      label: "Technology" },
-      { id: "world-card",   section: "world",     label: "World News" },
-      { id: "finance-card", section: "finance",   label: "Finance" }
-    ];
-
-    // Version ETag keys to avoid stale localStorage conflicts
-    const ETAG_VER = "v3";
-    const etagKey = (section) => `${ETAG_VER}-news-etag-${section}`;
-
-    // Has this list actually rendered items yet (beyond the default Loading… block)?
-    function hasRenderedItems(listEl){
-      return !!(listEl && listEl.querySelector && listEl.querySelector('.item'));
-    }
-
-    async function fetchNewsRaw(section, useETag = true){
-      const url = ABS("/.netlify/functions/news?section=" + encodeURIComponent(section));
-      const headers = {};
-      if (useETag) {
-        const et = localStorage.getItem(etagKey(section));
-        if (et) headers["If-None-Match"] = et;
-      }
-      return fetch(url, { headers, redirect: "follow" });
-    }
-
-    async function loadSection({ id, section, label }){
-      const listEl = document.querySelector(`#${id} .list`);
-
-      // 1) Try with ETag (if present)
-      let r = await fetchNewsRaw(section, true);
-
-      // 2) If 304 but no real items yet (only "Loading…"), refetch WITHOUT ETag to get cached JSON body
-      if (r.status === 304 && !hasRenderedItems(listEl)) {
-        r = await fetchNewsRaw(section, false);
-      }
-
-      if (r.status === 304) {
-        // Not modified and we already have items → keep DOM as-is
-        return;
-      }
-
-      if (!r.ok) {
-        if (!hasRenderedItems(listEl)) {
-          renderNewsList(listEl, [], `Could not load ${label}.`);
-        }
-        return;
-      }
-
-      const et = r.headers.get("etag");
-      if (et) localStorage.setItem(etagKey(section), et);
-
-      const data = await r.json();
-      renderNewsList(listEl, Array.isArray(data.articles) ? data.articles : [], `Could not load ${label}.`);
-      stamp(document.getElementById(id));
-    }
-
-    // ---- other data sources (no ETag logic needed here) ----
-    async function fetchCerf(){
-      const data = await fetchJSON(ABS("/.netlify/functions/substack?mode=archive"));
-      if (!data || data.status !== "ok" || !Array.isArray(data.articles)) return [];
-      return data.articles.map(a => ({
-        title: a.title || "Untitled",
-        url: a.url,
-        description: a.description || ""
-      }));
-    }
-
-    async function fetchRecommended(){
-      const data = await fetchJSON(ABS("/.netlify/functions/get-links"));
-      return (data && data.status === "ok") ? (data.articles || []) : [];
-    }
-
-    async function fetchMiniMarket(){
-      const data = await fetchJSON(ABS("/.netlify/functions/mini-market"));
-      if (!data || data.status !== "ok" || !data.data) return { btcUSD:null, xauUSD:null };
-      return data.data;
-    }
-
-    // -------- main update --------
-    async function updateAll(){
-      // Minimal market
-      try {
-        const mm = await fetchMiniMarket();
-        setPrice("price-btc", mm.btcUSD);
-        setPrice("price-xau", mm.xauUSD);
-      } catch (e) {
-        console.warn("mini-market failed:", e);
-        setPrice("price-btc", null);
-        setPrice("price-xau", null);
-      }
-
-      // Recommended + Cerf
-      try{
-        const [recs, cerf] = await Promise.all([
-          fetchRecommended().catch(()=>[]),
-          fetchCerf().catch(()=>[])
-        ]);
-        renderNewsList($("#recommended-card .list"), recs, "Could not load recommended links.");
-        stamp($("#recommended-card"));
-
-        renderNewsList($("#cerf-card .list"), cerf, "Could not load The Cerf Report.");
-        stamp($("#cerf-card"));
-      }catch(e){
-        console.error("Side lists update error:", e);
-      }
-
-      // Front/Tech/World/Finance with ETag-aware loader
-      await Promise.all(sectionDefs.map(loadSection));
-
-      const year = new Date().getFullYear();
-      $("#updatedAt").textContent = `Updated ${new Date().toLocaleString()} • © ${year} Disruptive Business Solution LLC`;
-    }
-
-    document.addEventListener("DOMContentLoaded", () => {
-      updateAll();
-      setInterval(updateAll, 5 * 60 * 1000);
-    });
-  </script>
-</body>
-</html>
+    .smallnote{margin-top:8px;color:
