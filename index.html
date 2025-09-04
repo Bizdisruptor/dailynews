@@ -113,10 +113,17 @@
         : Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
 
+    // Decode HTML entities & strip RSS CDATA
+    function decodeEntities(str=""){
+      const d = document.createElement("textarea");
+      d.innerHTML = str;
+      return d.value.replace(/^<!\[CDATA\[/, "").replace(/\]\]>$/, "");
+    }
+
     // Stronger fetch: logs body on failures & bad JSON
     async function fetchJSON(url){
       const r = await fetch(url, { redirect: "follow" });
-      const text = await r.text(); // read once for better error logs
+      const text = await r.text();
       if (!r.ok) {
         console.error("Fetch failed:", url, r.status, text.slice(0, 400));
         throw new Error(`HTTP ${r.status}`);
@@ -138,8 +145,8 @@
         if (!a || !a.title) continue;
         const div = document.createElement("div");
         div.className = "item";
-        const desc = a.description ? a.description : "";
-        div.innerHTML = `<a href="${a.url}" target="_blank" rel="noopener noreferrer">${a.title}</a>
+        const desc = a.description ? decodeEntities(a.description) : "";
+        div.innerHTML = `<a href="${a.url}" target="_blank" rel="noopener noreferrer">${decodeEntities(a.title)}</a>
                          <p>${desc}</p>`;
         listEl.appendChild(div);
       }
@@ -150,14 +157,22 @@
       if (s) s.textContent = `Updated ${new Date().toLocaleTimeString()}`;
     }
 
-    // ---- ETag-aware news fetch (with first-load fallback) ----
+    // ---- ETag-aware news fetch with proper first-paint detection ----
     const sectionDefs = [
       { id: "front-card",   section: "frontpage", label: "Front Page" },
       { id: "tech-card",    section: "tech",      label: "Technology" },
       { id: "world-card",   section: "world",     label: "World News" },
       { id: "finance-card", section: "finance",   label: "Finance" }
     ];
-    const etagKey = (section) => `news-etag-${section}`;
+
+    // Version ETag keys to avoid stale localStorage conflicts
+    const ETAG_VER = "v3";
+    const etagKey = (section) => `${ETAG_VER}-news-etag-${section}`;
+
+    // Has this list actually rendered items yet (beyond the default Loading… block)?
+    function hasRenderedItems(listEl){
+      return !!(listEl && listEl.querySelector && listEl.querySelector('.item'));
+    }
 
     async function fetchNewsRaw(section, useETag = true){
       const url = ABS("/.netlify/functions/news?section=" + encodeURIComponent(section));
@@ -175,18 +190,18 @@
       // 1) Try with ETag (if present)
       let r = await fetchNewsRaw(section, true);
 
-      // 2) If 304 but the card is empty (first paint), immediately refetch w/o ETag to get cached body
-      if (r.status === 304 && (!listEl || listEl.children.length === 0)) {
+      // 2) If 304 but no real items yet (only "Loading…"), refetch WITHOUT ETag to get cached JSON body
+      if (r.status === 304 && !hasRenderedItems(listEl)) {
         r = await fetchNewsRaw(section, false);
       }
 
       if (r.status === 304) {
-        // Not modified and DOM already has content → keep as-is
+        // Not modified and we already have items → keep DOM as-is
         return;
       }
 
       if (!r.ok) {
-        if (!listEl || !listEl.children.length) {
+        if (!hasRenderedItems(listEl)) {
           renderNewsList(listEl, [], `Could not load ${label}.`);
         }
         return;
@@ -235,7 +250,7 @@
         setPrice("price-xau", null);
       }
 
-      // Recommended + Cerf (simple)
+      // Recommended + Cerf
       try{
         const [recs, cerf] = await Promise.all([
           fetchRecommended().catch(()=>[]),
@@ -250,7 +265,7 @@
         console.error("Side lists update error:", e);
       }
 
-      // ETag-aware sections (Front, Tech, World, Finance)
+      // Front/Tech/World/Finance with ETag-aware loader
       await Promise.all(sectionDefs.map(loadSection));
 
       const year = new Date().getFullYear();
