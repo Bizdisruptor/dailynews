@@ -9,7 +9,7 @@
     * { box-sizing:border-box; }
     body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink);margin:0;padding:0}
 
-    /* Responsive banner using <img> so spaces in filename are safe */
+    /* Responsive banner using <img> */
     header.banner { position: relative; width:100%; height:220px; overflow:hidden; }
     .banner-img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
     .banner-text {
@@ -19,12 +19,12 @@
       max-width:94%; overflow:hidden; text-overflow:ellipsis;
     }
     @media (max-width: 768px) {
-      header.banner { height:160px; }
-      .banner-text { font-size:.95rem; padding:5px 10px; }
+      header.banner { height: 110px; } /* reduce height on tablets/phones */
+      .banner-text { font-size:.9rem; padding:5px 10px; }
     }
     @media (max-width: 480px) {
-      header.banner { height:130px; }
-      .banner-text { font-size:.9rem; padding:4px 9px; }
+      header.banner { height: 90px; }  /* even shorter on very small screens */
+      .banner-text { font-size:.85rem; padding:4px 8px; }
     }
 
     .market {
@@ -56,12 +56,11 @@
 </head>
 <body>
   <header class="banner">
-    <!-- If you rename the file, update the src below. Spaces are OK here. -->
     <img class="banner-img" src="The Cerf Report.png" alt="The Cerf Report banner" />
     <div class="banner-text">Curated News — news minus the junk.</div>
   </header>
 
-  <!-- Simple Market: Bitcoin + Gold only (links to Google Finance) -->
+  <!-- Simple Market -->
   <div class="market">
     <div class="row" id="simple-market">
       <div class="chip" id="price-btc">
@@ -121,7 +120,7 @@
   <div class="footer" id="updatedAt"></div>
 
   <script>
-    // -------- helpers --------
+    // helpers
     const ABS = (path) => new URL(path, location.origin).toString();
     const $ = (sel, root=document) => root.querySelector(sel);
 
@@ -132,41 +131,30 @@
         : Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
 
-    // Decode HTML entities & strip RSS CDATA
     function decodeEntities(str=""){
       const d = document.createElement("textarea");
       d.innerHTML = str;
       return d.value.replace(/^<!\[CDATA\[/, "").replace(/\]\]>$/, "");
     }
 
-    // Stronger fetch: logs body on failures & bad JSON
     async function fetchJSON(url){
       const r = await fetch(url, { redirect: "follow" });
       const text = await r.text();
-      if (!r.ok) {
-        console.error("Fetch failed:", url, r.status, text.slice(0, 400));
-        throw new Error(`HTTP ${r.status}`);
-      }
-      try { return JSON.parse(text); }
-      catch (e) {
-        console.error("Invalid JSON from:", url, text.slice(0, 400));
-        throw new Error("Invalid JSON");
-      }
+      if (!r.ok) throw new Error(`HTTP ${r.status}: ${text.slice(0,100)}`);
+      return JSON.parse(text);
     }
 
-    function renderNewsList(listEl, articles, errText = "Could not load news at this time."){
+    function renderNewsList(listEl, articles, errText){
       if (!Array.isArray(articles) || articles.length === 0){
         listEl.innerHTML = `<div class="loading">${errText}</div>`;
         return;
       }
       listEl.innerHTML = "";
       for (const a of articles){
-        if (!a || !a.title) continue;
         const div = document.createElement("div");
         div.className = "item";
-        const desc = a.description ? decodeEntities(a.description) : "";
-        div.innerHTML = `<a href="${a.url}" target="_blank" rel="noopener noreferrer">${decodeEntities(a.title)}</a>
-                         <p>${desc}</p>`;
+        div.innerHTML = `<a href="${a.url}" target="_blank">${decodeEntities(a.title)}</a>
+                         <p>${a.description||""}</p>`;
         listEl.appendChild(div);
       }
     }
@@ -176,7 +164,6 @@
       if (s) s.textContent = `Updated ${new Date().toLocaleTimeString()}`;
     }
 
-    // ---- ETag-aware news fetch with proper first-paint detection ----
     const sectionDefs = [
       { id: "front-card",   section: "frontpage", label: "Front Page" },
       { id: "tech-card",    section: "tech",      label: "Technology" },
@@ -184,116 +171,53 @@
       { id: "finance-card", section: "finance",   label: "Finance" }
     ];
 
-    // Version ETag keys to avoid stale localStorage conflicts
-    const ETAG_VER = "v3";
-    const etagKey = (section) => `${ETAG_VER}-news-etag-${section}`;
-
-    // Has this list actually rendered items yet (beyond the default Loading… block)?
-    function hasRenderedItems(listEl){
-      return !!(listEl && listEl.querySelector && listEl.querySelector('.item'));
-    }
-
-    async function fetchNewsRaw(section, useETag = true){
-      const url = ABS("/.netlify/functions/news?section=" + encodeURIComponent(section));
-      const headers = {};
-      if (useETag) {
-        const et = localStorage.getItem(etagKey(section));
-        if (et) headers["If-None-Match"] = et;
-      }
-      return fetch(url, { headers, redirect: "follow" });
-    }
-
     async function loadSection({ id, section, label }){
       const listEl = document.querySelector(`#${id} .list`);
-
-      // 1) Try with ETag (if present)
-      let r = await fetchNewsRaw(section, true);
-
-      // 2) If 304 but no real items yet (only "Loading…"), refetch WITHOUT ETag to get cached JSON body
-      if (r.status === 304 && !hasRenderedItems(listEl)) {
-        r = await fetchNewsRaw(section, false);
-      }
-
-      if (r.status === 304) {
-        // Not modified and we already have items → keep DOM as-is
-        return;
-      }
-
-      if (!r.ok) {
-        if (!hasRenderedItems(listEl)) {
-          renderNewsList(listEl, [], `Could not load ${label}.`);
-        }
-        return;
-      }
-
-      const et = r.headers.get("etag");
-      if (et) localStorage.setItem(etagKey(section), et);
-
+      let r = await fetch(ABS("/.netlify/functions/news?section="+section));
+      if (!r.ok) return renderNewsList(listEl, [], `Could not load ${label}.`);
       const data = await r.json();
-      renderNewsList(listEl, Array.isArray(data.articles) ? data.articles : [], `Could not load ${label}.`);
+      renderNewsList(listEl, data.articles, `Could not load ${label}.`);
       stamp(document.getElementById(id));
     }
 
-    // ---- other data sources (no ETag logic needed here) ----
     async function fetchCerf(){
-      const data = await fetchJSON(ABS("/.netlify/functions/substack?mode=archive"));
-      if (!data || data.status !== "ok" || !Array.isArray(data.articles)) return [];
-      return data.articles.map(a => ({
-        title: a.title || "Untitled",
-        url: a.url,
-        description: a.description || ""
-      }));
+      const d = await fetchJSON(ABS("/.netlify/functions/substack?mode=archive"));
+      return d.articles||[];
     }
 
     async function fetchRecommended(){
-      const data = await fetchJSON(ABS("/.netlify/functions/get-links"));
-      return (data && data.status === "ok") ? (data.articles || []) : [];
+      const d = await fetchJSON(ABS("/.netlify/functions/get-links"));
+      return d.articles||[];
     }
 
     async function fetchMiniMarket(){
-      const data = await fetchJSON(ABS("/.netlify/functions/mini-market"));
-      if (!data || data.status !== "ok" || !data.data) return { btcUSD:null, xauUSD:null };
-      return data.data;
+      const d = await fetchJSON(ABS("/.netlify/functions/mini-market"));
+      return d.data||{btcUSD:null,xauUSD:null};
     }
 
-    // -------- main update --------
     async function updateAll(){
-      // Minimal market
       try {
         const mm = await fetchMiniMarket();
         setPrice("price-btc", mm.btcUSD);
         setPrice("price-xau", mm.xauUSD);
-      } catch (e) {
-        console.warn("mini-market failed:", e);
-        setPrice("price-btc", null);
-        setPrice("price-xau", null);
-      }
+      } catch(e){ setPrice("price-btc", null); setPrice("price-xau", null); }
 
-      // Recommended + Cerf
-      try{
-        const [recs, cerf] = await Promise.all([
-          fetchRecommended().catch(()=>[]),
-          fetchCerf().catch(()=>[])
-        ]);
-        renderNewsList($("#recommended-card .list"), recs, "Could not load recommended links.");
-        stamp($("#recommended-card"));
+      const [recs, cerf] = await Promise.all([
+        fetchRecommended().catch(()=>[]),
+        fetchCerf().catch(()=>[])
+      ]);
+      renderNewsList($("#recommended-card .list"), recs, "Could not load recommended.");
+      stamp($("#recommended-card"));
+      renderNewsList($("#cerf-card .list"), cerf, "Could not load The Cerf Report.");
+      stamp($("#cerf-card"));
 
-        renderNewsList($("#cerf-card .list"), cerf, "Could not load The Cerf Report.");
-        stamp($("#cerf-card"));
-      }catch(e){
-        console.error("Side lists update error:", e);
-      }
-
-      // Front/Tech/World/Finance with ETag-aware loader
       await Promise.all(sectionDefs.map(loadSection));
-
-      const year = new Date().getFullYear();
-      $("#updatedAt").textContent = `Updated ${new Date().toLocaleString()} • © ${year} Disruptive Business Solution LLC`;
+      $("#updatedAt").textContent = `Updated ${new Date().toLocaleString()}`;
     }
 
     document.addEventListener("DOMContentLoaded", () => {
       updateAll();
-      setInterval(updateAll, 5 * 60 * 1000);
+      setInterval(updateAll, 5*60*1000);
     });
   </script>
 </body>
