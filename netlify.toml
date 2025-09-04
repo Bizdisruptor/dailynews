@@ -5,14 +5,14 @@
 [functions]
   node_bundler = "esbuild"   # good default; works with CommonJS or ESM
 
-# --- keep functions on Netlify hosts (do NOT redirect these) ---
+# --- keep functions working on netlify hosts ---
 [[redirects]]
   from = "/.netlify/functions/*"
   to   = "/.netlify/functions/:splat"
   status = 200
   conditions = { Host = ["cerfreportnews.netlify.app", "*--cerfreportnews.netlify.app"] }
 
-# --- redirect everything else on netlify.app to the apex ---
+# --- redirect everything else on netlify.app to apex ---
 [[redirects]]
   from = "/*"
   to   = "https://thecerfreport.com/:splat"
