@@ -9,26 +9,33 @@
     * { box-sizing:border-box; }
     body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink);margin:0;padding:0}
 
-    /* Responsive banner using <img> */
+    /* Banner */
     header.banner { position: relative; width:100%; height:220px; overflow:hidden; }
     .banner-img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+    /* Desktop/tablet overlay */
     .banner-text {
       position:absolute; left:50%; bottom:12px; transform:translateX(-50%);
       font-size:1rem; font-weight:600; color:#fff; background:rgba(0,0,0,.55);
-      padding:6px 12px; border-radius:6px;
-      text-align:center; 
-      white-space: normal;    /* allow wrapping */
-      line-height: 1.3;
-      max-width:94%;
-      overflow:hidden;
+      padding:6px 12px; border-radius:6px; text-align:center;
+      white-space: normal; line-height:1.3; max-width:94%; overflow:hidden;
     }
+    /* Mobile tagline BELOW the image (overlay hidden) */
+    .mobile-tagline {
+      display:none;
+      padding:10px 14px 0;
+      text-align:center;
+      font-weight:600;
+      line-height:1.35;
+    }
+
     @media (max-width: 768px) {
       header.banner { height: 110px; }
-      .banner-text { font-size:.9rem; padding:5px 10px; bottom:6px; }
+      .banner-text { display:none; }     /* hide overlay on mobile */
+      .mobile-tagline { display:block; font-size:.9rem; }
     }
     @media (max-width: 480px) {
       header.banner { height: 90px; }
-      .banner-text { font-size:.75rem; padding:3px 6px; bottom:4px; }
+      .mobile-tagline { font-size:.85rem; padding-top:8px; }
     }
 
     .market {
@@ -63,6 +70,8 @@
     <img class="banner-img" src="The Cerf Report.png" alt="The Cerf Report banner" />
     <div class="banner-text">More signal. Less noise — curated analysis across tech, finance, and politics.</div>
   </header>
+  <!-- Shown only on mobile via CSS above -->
+  <div class="mobile-tagline">More signal. Less noise — curated analysis across tech, finance, and politics.</div>
 
   <!-- Simple Market -->
   <div class="market">
@@ -157,7 +166,7 @@
       for (const a of articles){
         const div = document.createElement("div");
         div.className = "item";
-        div.innerHTML = `<a href="${a.url}" target="_blank">${decodeEntities(a.title)}</a>
+        div.innerHTML = `<a href="${a.url}" target="_blank" rel="noopener">${decodeEntities(a.title)}</a>
                          <p>${a.description||""}</p>`;
         listEl.appendChild(div);
       }
@@ -177,7 +186,7 @@
 
     async function loadSection({ id, section, label }){
       const listEl = document.querySelector(`#${id} .list`);
-      let r = await fetch(ABS("/.netlify/functions/news?section="+section));
+      let r = await fetch(ABS("/.netlify/functions/news?section="+encodeURIComponent(section)));
       if (!r.ok) return renderNewsList(listEl, [], `Could not load ${label}.`);
       const data = await r.json();
       renderNewsList(listEl, data.articles, `Could not load ${label}.`);
