@@ -70,15 +70,17 @@ exports.handler = async (event) => {
       return { statusCode: 502, headers: HEADERS, body: JSON.stringify({ status: "error", message: "Zapier responded " + resp.status, detail: text.slice(0, 300) }) };
     }
 
-    // simple HTML success (avoids template literals)
-    return {
-      statusCode: 200,
-      headers: { ...HEADERS, "Content-Type": "text/html" },
-      body: '<!doctype html><html><body style="font-family:sans-serif;text-align:center;padding:32px">' +
-            '<h2>Saved ✅</h2><p>' + (title ? String(title) : "") + '</p>' +
-            '<script>setTimeout(function(){window.close()},1200)</script>' +
-            '</body></html>',
-    };
+    // ...inside your success return:
+return {
+  statusCode: 200,
+  headers: { ...HEADERS, "Content-Type": "text/html; charset=utf-8" },
+  body:
+    '<!doctype html><html><head><meta charset="utf-8"></head><body style="font-family:sans-serif;text-align:center;padding:32px">' +
+    "<h2>Saved ✅</h2><p>" + (title ? String(title) : "") + "</p>" +
+    '<script>setTimeout(function(){window.close()},1200)</script>' +
+    "</body></html>",
+};
+
   } catch (err) {
     return { statusCode: 500, headers: HEADERS, body: JSON.stringify({ status: "error", message: String(err) }) };
   }
