@@ -10,13 +10,14 @@ const HEADERS = {
 };
 
 exports.handler = async (event) => {
-  try {
-    // CORS preflight
-    if (event.httpMethod === 'OPTIONS') {
-      return { statusCode: 204, headers: HEADERS, body: '' };
-    }
+  // CORS preflight
+  if (event.httpMethod === 'OPTIONS') {
+    return { statusCode: 204, headers: HEADERS, body: '' };
+  }
 
+  try {
     const { ZAPIER_WEBHOOK_URL, SECRET_KEY } = process.env;
+
     if (!ZAPIER_WEBHOOK_URL) {
       return { statusCode: 500, headers: HEADERS, body: JSON.stringify({ status: 'error', message: 'ZAPIER_WEBHOOK_URL not set' }) };
     }
@@ -24,7 +25,7 @@ exports.handler = async (event) => {
       return { statusCode: 500, headers: HEADERS, body: JSON.stringify({ status: 'error', message: 'SECRET_KEY not set' }) };
     }
 
-    // Get input from GET query or POST body
+    // Read inputs (GET or POST)
     let title, url, description, tag, providedSecret;
 
     if (event.httpMethod === 'GET') {
@@ -46,25 +47,20 @@ exports.handler = async (event) => {
       url = body.url;
       description = body.description || '';
       tag = body.tag || 'general';
-      providedSecret = body.secret || event.headers['x-secret'];
-      // Also allow POST query params to override
-      const p = event.queryStringParameters || {};
-      providedSecret = providedSecret || p.secret;
+      providedSecret = body.secret || event.headers['x-secret'] || (event.queryStringParameters || {}).secret;
     } else {
       return { statusCode: 405, headers: HEADERS, body: JSON.stringify({ status: 'error', message: 'Method not allowed' }) };
     }
 
-    // Security check
+    // Security + validation
     if (!providedSecret || providedSecret !== SECRET_KEY) {
       return { statusCode: 401, headers: HEADERS, body: JSON.stringify({ status: 'error', message: 'Unauthorized' }) };
     }
-
-    // Validation
     if (!title || !url) {
       return { statusCode: 400, headers: HEADERS, body: JSON.stringify({ status: 'error', message: 'Title and URL are required' }) };
     }
 
-    // Forward to Zapier
+    // Send to Zapier
     const resp = await fetch(ZAPIER_WEBHOOK_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -76,22 +72,17 @@ exports.handler = async (event) => {
       return {
         statusCode: 502,
         headers: HEADERS,
-        body: JSON.stringify({ status: 'error', message: `Zapier responded ${resp.status}`, detail: text.slice(0, 500) }),
+        body: JSON.stringify({ status: 'error', message: `Zapier responded ${resp.status}`, detail: text.slice(0, 300) }),
       };
     }
 
-    // Success HTML with auto-close (handy for bookmarklet)
+    // Success page (closes tab for bookmarklet)
     return {
       statusCode: 200,
       headers: { ...HEADERS, 'Content-Type': 'text/html' },
       body: `<!doctype html><html><body style="font-family:sans-serif;text-align:center;padding:32px">
-        <h2>Saved ✅</h2>
-        <p>${title}</p>
-        <script>setTimeout(()=>window.close(),1200)</script>
+        <h2>Saved ✅</h2><p>${title}</p><script>setTimeout(()=>window.close(),1200)</script>
       </body></html>`,
     };
   } catch (err) {
-    console.error(err);
-    return { statusCode: 500, headers: HEADERS, body: JSON.stringify({ status: 'error', message: String(err) }) };
-  }
-};
+    console.error
