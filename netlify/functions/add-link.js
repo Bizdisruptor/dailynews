@@ -1,67 +1,97 @@
 // netlify/functions/add-link.js
-// Securely receives data from a bookmarklet and forwards it to a Zapier webhook.
-const fetch = require("node-fetch");
+// Receives a bookmark and forwards to Zapier Catch Hook.
+// Env vars required: SECRET_KEY, ZAPIER_WEBHOOK_URL
 
-exports.handler = async function(event) {
-  // ✅ FIX: Read all parameters, including the secret, from the URL query string.
-  const { title, url, description, tag, secret } = event.queryStringParameters;
+const HEADERS = {
+  'Content-Type': 'application/json',
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, x-secret',
+};
 
-  // --- Security Check ---
-  // Compare the secret from the URL with the one set in your Netlify environment.
-  if (secret !== process.env.SECRET_KEY) {
-    return {
-      statusCode: 401,
-      body: "Unauthorized",
-    };
-  }
-
-  // --- Data Validation ---
-  if (!title || !url) {
-    return {
-      statusCode: 400,
-      body: "Title and URL are required.",
-    };
-  }
-
-  const zapierWebhookUrl = process.env.ZAPIER_WEBHOOK_URL;
-  if (!zapierWebhookUrl) {
-    return {
-      statusCode: 500,
-      body: "Zapier webhook URL is not configured.",
-    };
-  }
-
-  // --- Forward data to Zapier ---
+exports.handler = async (event) => {
   try {
-    await fetch(zapierWebhookUrl, {
+    // CORS preflight
+    if (event.httpMethod === 'OPTIONS') {
+      return { statusCode: 204, headers: HEADERS, body: '' };
+    }
+
+    const { ZAPIER_WEBHOOK_URL, SECRET_KEY } = process.env;
+    if (!ZAPIER_WEBHOOK_URL) {
+      return { statusCode: 500, headers: HEADERS, body: JSON.stringify({ status: 'error', message: 'ZAPIER_WEBHOOK_URL not set' }) };
+    }
+    if (!SECRET_KEY) {
+      return { statusCode: 500, headers: HEADERS, body: JSON.stringify({ status: 'error', message: 'SECRET_KEY not set' }) };
+    }
+
+    // Get input from GET query or POST body
+    let title, url, description, tag, providedSecret;
+
+    if (event.httpMethod === 'GET') {
+      const p = event.queryStringParameters || {};
+      title = p.title;
+      url = p.url;
+      description = p.description || '';
+      tag = p.tag || 'general';
+      providedSecret = p.secret || event.headers['x-secret'];
+    } else if (event.httpMethod === 'POST') {
+      const ct = (event.headers['content-type'] || '').toLowerCase();
+      let body = {};
+      if (ct.includes('application/json')) {
+        body = event.body ? JSON.parse(event.body) : {};
+      } else if (ct.includes('application/x-www-form-urlencoded')) {
+        body = Object.fromEntries(new URLSearchParams(event.body));
+      }
+      title = body.title;
+      url = body.url;
+      description = body.description || '';
+      tag = body.tag || 'general';
+      providedSecret = body.secret || event.headers['x-secret'];
+      // Also allow POST query params to override
+      const p = event.queryStringParameters || {};
+      providedSecret = providedSecret || p.secret;
+    } else {
+      return { statusCode: 405, headers: HEADERS, body: JSON.stringify({ status: 'error', message: 'Method not allowed' }) };
+    }
+
+    // Security check
+    if (!providedSecret || providedSecret !== SECRET_KEY) {
+      return { statusCode: 401, headers: HEADERS, body: JSON.stringify({ status: 'error', message: 'Unauthorized' }) };
+    }
+
+    // Validation
+    if (!title || !url) {
+      return { statusCode: 400, headers: HEADERS, body: JSON.stringify({ status: 'error', message: 'Title and URL are required' }) };
+    }
+
+    // Forward to Zapier
+    const resp = await fetch(ZAPIER_WEBHOOK_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        title,
-        url,
-        description: description || '',
-        tag: tag || 'general'
-      })
+      body: JSON.stringify({ title, url, description, tag }),
     });
 
-    // Return a simple success page
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '');
+      return {
+        statusCode: 502,
+        headers: HEADERS,
+        body: JSON.stringify({ status: 'error', message: `Zapier responded ${resp.status}`, detail: text.slice(0, 500) }),
+      };
+    }
+
+    // Success HTML with auto-close (handy for bookmarklet)
     return {
       statusCode: 200,
-      headers: { 'Content-Type': 'text/html' },
-      body: `
-        <html lang="en">
-        <body style="font-family: sans-serif; background: #f0f2f5; text-align: center; padding-top: 50px;">
-          <h1 style="color: #0056b3;">Success!</h1>
-          <p>The link has been added to your sheet.</p>
-          <script>setTimeout(() => window.close(), 1500);</script>
-        </body>
-        </html>
-      `
+      headers: { ...HEADERS, 'Content-Type': 'text/html' },
+      body: `<!doctype html><html><body style="font-family:sans-serif;text-align:center;padding:32px">
+        <h2>Saved ✅</h2>
+        <p>${title}</p>
+        <script>setTimeout(()=>window.close(),1200)</script>
+      </body></html>`,
     };
-  } catch (e) {
-    return {
-      statusCode: 500,
-      body: `Error forwarding to Zapier: ${e.message}`,
-    };
+  } catch (err) {
+    console.error(err);
+    return { statusCode: 500, headers: HEADERS, body: JSON.stringify({ status: 'error', message: String(err) }) };
   }
 };
