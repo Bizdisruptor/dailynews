@@ -12,17 +12,25 @@
     /* Banner */
     header.banner { position: relative; width:100%; height:220px; overflow:hidden; }
     .banner-img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+    /* Desktop/tablet overlay */
     .banner-text {
       position:absolute; left:50%; bottom:12px; transform:translateX(-50%);
       font-size:1rem; font-weight:600; color:#fff; background:rgba(0,0,0,.55);
       padding:6px 12px; border-radius:6px; text-align:center;
       white-space: normal; line-height:1.3; max-width:94%; overflow:hidden;
     }
-    .mobile-tagline { display:none; padding:10px 14px 0; text-align:center; font-weight:600; line-height:1.35; }
+    /* Mobile tagline BELOW the image (overlay hidden) */
+    .mobile-tagline {
+      display:none;
+      padding:10px 14px 0;
+      text-align:center;
+      font-weight:600;
+      line-height:1.35;
+    }
 
     @media (max-width: 768px) {
       header.banner { height: 110px; }
-      .banner-text { display:none; }
+      .banner-text { display:none; }     /* hide overlay on mobile */
       .mobile-tagline { display:block; font-size:.9rem; }
     }
     @media (max-width: 480px) {
@@ -52,7 +60,6 @@
     .item a{color:#0d6efd;text-decoration:none;font-weight:600}
     .item a:hover{text-decoration:underline}
     .item p{margin:6px 0 0;color:var(--muted);font-size:.92rem;line-height:1.35}
-    .tagpill{display:inline-block;margin-top:6px;font-size:.78rem;color:#2a2e33;background:#eef3ff;border:1px solid #d6e3ff;border-radius:999px;padding:2px 8px}
     .loading{text-align:center;padding:14px;color:var(--muted);line-height:1.4;}
     .smallnote{margin-top:8px;color:#8a8f98;font-size:.8rem}
     .footer{margin:16px auto 0;text-align:center;color:#8a8f98;font-size:.85rem;max-width:1400px}
@@ -63,6 +70,7 @@
     <img class="banner-img" src="The Cerf Report.png" alt="The Cerf Report banner" />
     <div class="banner-text">More signal. Less noise — curated analysis across tech, finance, and politics.</div>
   </header>
+  <!-- Shown only on mobile via CSS above -->
   <div class="mobile-tagline">More signal. Less noise — curated analysis across tech, finance, and politics.</div>
 
   <!-- Simple Market -->
@@ -125,9 +133,6 @@
   <div class="footer" id="updatedAt"></div>
 
   <script>
-    // ====== CONFIG ======
-    const SHEET_API = "YOUR_APPS_SCRIPT_URL"; // <-- paste your Apps Script URL here
-
     // helpers
     const ABS = (path) => new URL(path, location.origin).toString();
     const $ = (sel, root=document) => root.querySelector(sel);
@@ -161,11 +166,8 @@
       for (const a of articles){
         const div = document.createElement("div");
         div.className = "item";
-        div.innerHTML = `
-          <a href="${a.url}" target="_blank" rel="noopener">${decodeEntities(a.title)}</a>
-          <p>${a.description||""}</p>
-          ${a.tag ? `<span class="tagpill">${a.tag}</span>` : ""}
-        `;
+        div.innerHTML = `<a href="${a.url}" target="_blank" rel="noopener">${decodeEntities(a.title)}</a>
+                         <p>${a.description||""}</p>`;
         listEl.appendChild(div);
       }
     }
@@ -191,23 +193,13 @@
       stamp(document.getElementById(id));
     }
 
-    // ====== RECOMMENDED from SHEET ======
-    async function fetchRecommendedFromSheet(){
-      // Apps Script returns rows with headers: Title, URL, Description, Tag
-      const rows = await fetchJSON(SHEET_API);
-      // map to the same shape renderNewsList expects
-      return rows.map(r => ({
-        title: r.Title || "",
-        url: r.URL || "",
-        description: r.Description || "",
-        tag: r.Tag || ""
-      }))
-      // optional: filter out rows missing URL
-      .filter(r => r.url);
-    }
-
     async function fetchCerf(){
       const d = await fetchJSON(ABS("/.netlify/functions/substack?mode=archive"));
+      return d.articles||[];
+    }
+
+    async function fetchRecommended(){
+      const d = await fetchJSON(ABS("/.netlify/functions/get-links"));
       return d.articles||[];
     }
 
@@ -217,25 +209,21 @@
     }
 
     async function updateAll(){
-      // market
       try {
         const mm = await fetchMiniMarket();
         setPrice("price-btc", mm.btcUSD);
         setPrice("price-xau", mm.xauUSD);
       } catch(e){ setPrice("price-btc", null); setPrice("price-xau", null); }
 
-      // recommended from SHEET + cerf archive
       const [recs, cerf] = await Promise.all([
-        fetchRecommendedFromSheet().catch(()=>[]),
+        fetchRecommended().catch(()=>[]),
         fetchCerf().catch(()=>[])
       ]);
-      renderNewsList($("#recommended-card .list"), recs, "No recommended links yet.");
+      renderNewsList($("#recommended-card .list"), recs, "Could not load recommended.");
       stamp($("#recommended-card"));
-
       renderNewsList($("#cerf-card .list"), cerf, "Could not load The Cerf Report.");
       stamp($("#cerf-card"));
 
-      // sections
       await Promise.all(sectionDefs.map(loadSection));
       $("#updatedAt").textContent = `Updated ${new Date().toLocaleString()}`;
     }
