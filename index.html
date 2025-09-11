@@ -12,17 +12,13 @@
     /* Banner */
     header.banner { position: relative; width:100%; height:220px; overflow:hidden; }
     .banner-img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
-    /* Desktop/tablet overlay */
     .banner-text {
       position:absolute; left:50%; bottom:12px; transform:translateX(-50%);
       font-size:1rem; font-weight:600; color:#fff; background:rgba(0,0,0,.55);
       padding:6px 12px; border-radius:6px; text-align:center;
       white-space: normal; line-height:1.3; max-width:94%; overflow:hidden;
     }
-    /* Mobile tagline BELOW the image (overlay hidden) */
-    .mobile-tagline {
-      display:none; padding:10px 14px 0; text-align:center; font-weight:600; line-height:1.35;
-    }
+    .mobile-tagline { display:none; padding:10px 14px 0; text-align:center; font-weight:600; line-height:1.35; }
 
     @media (max-width: 768px) {
       header.banner { height: 110px; }
@@ -58,102 +54,4 @@
     .item p{margin:6px 0 0;color:var(--muted);font-size:.92rem;line-height:1.35}
     .loading{text-align:center;padding:14px;color:var(--muted);line-height:1.4;}
     .smallnote{margin-top:8px;color:#8a8f98;font-size:.8rem}
-    .footer{margin:16px auto 0;text-align:center;color:#8a8f98;font-size:.85rem;max-width:1400px}
-  </style>
-</head>
-<body>
-  <header class="banner">
-    <img class="banner-img" src="The Cerf Report.png" alt="The Cerf Report banner" />
-    <div class="banner-text">More signal. Less noise — curated analysis across tech, finance, and politics.</div>
-  </header>
-  <div class="mobile-tagline">More signal. Less noise — curated analysis across tech, finance, and politics.</div>
-
-  <!-- Simple Market -->
-  <div class="market">
-    <div class="row" id="simple-market">
-      <div class="chip" id="price-btc">
-        <a href="https://www.google.com/finance/quote/BTC-USD" target="_blank" rel="noopener">Bitcoin (BTC)</a>
-        <span class="price">—</span>
-      </div>
-      <div class="chip" id="price-xau">
-        <a href="https://www.google.com/finance/quote/XAU-USD" target="_blank" rel="noopener">Gold (XAU)</a>
-        <span class="price">—</span>
-      </div>
-    </div>
-  </div>
-
-  <div class="grid">
-    <div class="card" id="recommended-card">
-      <h2>Recommended Reading</h2>
-      <div class="list"><div class="loading">Loading…</div></div>
-      <div class="smallnote" data-stamp></div>
-    </div>
-
-    <div class="card" id="cerf-card">
-      <h2>The Cerf Report</h2>
-      <div class="section-link">
-        <a href="https://thecerfreport.substack.com/" target="_blank" rel="noopener noreferrer">
-          thecerfreport.substack.com →
-        </a>
-      </div>
-      <div class="list"><div class="loading">Loading…</div></div>
-      <div class="smallnote" data-stamp></div>
-    </div>
-
-    <div class="card" id="front-card">
-      <h2>Front Page</h2>
-      <div class="list"><div class="loading">Loading…</div></div>
-      <div class="smallnote" data-stamp></div>
-    </div>
-
-    <div class="card" id="tech-card">
-      <h2>Technology</h2>
-      <div class="list"><div class="loading">Loading…</div></div>
-      <div class="smallnote" data-stamp></div>
-    </div>
-
-    <div class="card" id="world-card">
-      <h2>World News</h2>
-      <div class="list"><div class="loading">Loading…</div></div>
-      <div class="smallnote" data-stamp></div>
-    </div>
-
-    <div class="card" id="finance-card">
-      <h2>Finance</h2>
-      <div class="list"><div class="loading">Loading…</div></div>
-      <div class="smallnote" data-stamp></div>
-    </div>
-  </div>
-
-  <div class="footer" id="updatedAt"></div>
-
-  <script>
-    // ---------- helpers ----------
-    const ABS = (path) => new URL(path, location.origin).toString();
-    const $ = (sel, root=document) => root.querySelector(sel);
-
-    function setPrice(elId, value){
-      const el = document.querySelector(`#${elId} .price`);
-      el.textContent = (value == null)
-        ? "—"
-        : Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    }
-
-    function decodeEntities(str=""){
-      const d = document.createElement("textarea");
-      d.innerHTML = str;
-      return d.value.replace(/^<!\[CDATA\[/, "").replace(/\]\]>$/, "");
-    }
-
-    // Robust JSON fetch with clear console surfacing for non-JSON responses
-    async function fetchJSON(url){
-      const r = await fetch(url, { redirect: "follow" });
-      const text = await r.text();
-      if (!r.ok) {
-        console.error(`Request failed ${url}: HTTP ${r.status}`, text.slice(0,200));
-        throw new Error(`HTTP ${r.status}`);
-      }
-      try {
-        return JSON.parse(text);
-      } catch (e) {
-        console.error(`Non-JSON from ${url}:`, tex
+    .footer{margin:16px auto 0;t
