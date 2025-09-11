@@ -54,4 +54,182 @@
     .item p{margin:6px 0 0;color:var(--muted);font-size:.92rem;line-height:1.35}
     .loading{text-align:center;padding:14px;color:var(--muted);line-height:1.4;}
     .smallnote{margin-top:8px;color:#8a8f98;font-size:.8rem}
-    .footer{margin:16px auto 0;t
+    .footer{margin:16px auto 0;text-align:center;color:#8a8f98;font-size:.85rem;max-width:1400px}
+  </style>
+</head>
+<body>
+  <header class="banner">
+    <img class="banner-img" src="The Cerf Report.png" alt="The Cerf Report banner" />
+    <div class="banner-text">More signal. Less noise — curated analysis across tech, finance, and politics.</div>
+  </header>
+  <div class="mobile-tagline">More signal. Less noise — curated analysis across tech, finance, and politics.</div>
+
+  <!-- Simple Market -->
+  <div class="market">
+    <div class="row" id="simple-market">
+      <div class="chip" id="price-btc">
+        <a href="https://www.google.com/finance/quote/BTC-USD" target="_blank" rel="noopener">Bitcoin (BTC)</a>
+        <span class="price">—</span>
+      </div>
+      <div class="chip" id="price-xau">
+        <a href="https://www.google.com/finance/quote/XAU-USD" target="_blank" rel="noopener">Gold (XAU)</a>
+        <span class="price">—</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card" id="recommended-card">
+      <h2>Recommended Reading</h2>
+      <div class="list"><div class="loading">Loading…</div></div>
+      <div class="smallnote" data-stamp></div>
+    </div>
+
+    <div class="card" id="cerf-card">
+      <h2>The Cerf Report</h2>
+      <div class="section-link">
+        <a href="https://thecerfreport.substack.com/" target="_blank" rel="noopener noreferrer">
+          thecerfreport.substack.com →
+        </a>
+      </div>
+      <div class="list"><div class="loading">Loading…</div></div>
+      <div class="smallnote" data-stamp></div>
+    </div>
+
+    <div class="card" id="front-card">
+      <h2>Front Page</h2>
+      <div class="list"><div class="loading">Loading…</div></div>
+      <div class="smallnote" data-stamp></div>
+    </div>
+
+    <div class="card" id="tech-card">
+      <h2>Technology</h2>
+      <div class="list"><div class="loading">Loading…</div></div>
+      <div class="smallnote" data-stamp></div>
+    </div>
+
+    <div class="card" id="world-card">
+      <h2>World News</h2>
+      <div class="list"><div class="loading">Loading…</div></div>
+      <div class="smallnote" data-stamp></div>
+    </div>
+
+    <div class="card" id="finance-card">
+      <h2>Finance</h2>
+      <div class="list"><div class="loading">Loading…</div></div>
+      <div class="smallnote" data-stamp></div>
+    </div>
+  </div>
+
+  <div class="footer" id="updatedAt"></div>
+
+  <script>
+    // -------- OPTIONAL: force your Netlify base (leave "" to use current origin)
+    // const NETLIFY_BASE = "https://<your-site>.netlify.app";
+    const NETLIFY_BASE = "";
+    const ABS = (path) => new URL(path, NETLIFY_BASE || location.origin).toString();
+    const $ = (sel, root=document) => root.querySelector(sel);
+
+    function setPrice(elId, value){
+      const el = document.querySelector(`#${elId} .price`);
+      el.textContent = (value == null)
+        ? "—"
+        : Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function decodeEntities(str=""){
+      const d = document.createElement("textarea");
+      d.innerHTML = str;
+      return d.value.replace(/^<!\[CDATA\[/, "").replace(/\]\]>$/, "");
+    }
+
+    async function fetchJSON(url){
+      const r = await fetch(url, { redirect: "follow" });
+      const text = await r.text();
+      if (!r.ok) throw new Error(`HTTP ${r.status}: ${text.slice(0,120)}`);
+      return JSON.parse(text);
+    }
+
+    function renderNewsList(listEl, articles, errText){
+      if (!Array.isArray(articles) || articles.length === 0){
+        listEl.innerHTML = `<div class="loading">${errText}</div>`;
+        return;
+      }
+      listEl.innerHTML = "";
+      for (const a of articles){
+        const div = document.createElement("div");
+        div.className = "item";
+        div.innerHTML = `<a href="${a.url}" target="_blank" rel="noopener">${decodeEntities(a.title)}</a>
+                         <p>${a.description||""}</p>`;
+        listEl.appendChild(div);
+      }
+    }
+
+    function stamp(cardEl){
+      const s = cardEl.querySelector('[data-stamp]');
+      if (s) s.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+    }
+
+    const sectionDefs = [
+      { id: "front-card",   section: "frontpage", label: "Front Page" },
+      { id: "tech-card",    section: "tech",      label: "Technology" },
+      { id: "world-card",   section: "world",     label: "World News" },
+      { id: "finance-card", section: "finance",   label: "Finance" }
+    ];
+
+    async function loadSection({ id, section, label }){
+      const listEl = document.querySelector(`#${id} .list`);
+      try {
+        const r = await fetch(ABS("/.netlify/functions/news?section="+encodeURIComponent(section)));
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const data = await r.json();
+        renderNewsList(listEl, data.articles, `Could not load ${label}.`);
+        stamp(document.getElementById(id));
+      } catch (e) {
+        renderNewsList(listEl, [], `Could not load ${label}.`);
+      }
+    }
+
+    async function fetchCerf(){
+      const d = await fetchJSON(ABS("/.netlify/functions/substack?mode=archive"));
+      return d.articles||[];
+    }
+
+    // --- Only change to Recommended: tiny retry + timeout guard ---
+    function withTimeout(promise, ms = 3500) {
+      return Promise.race([
+        promise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), ms))
+      ]);
+    }
+    async function fetchRecommended(){
+      // first try (short)
+      try {
+        const d = await withTimeout(fetchJSON(ABS("/.netlify/functions/get-links")), 3500);
+        return d.articles || [];
+      } catch {
+        // second try (a bit longer)
+        const d2 = await withTimeout(fetchJSON(ABS("/.netlify/functions/get-links")), 6000);
+        return d2.articles || [];
+      }
+    }
+
+    async function fetchMiniMarket(){
+      const d = await fetchJSON(ABS("/.netlify/functions/mini-market"));
+      return d.data||{btcUSD:null,xauUSD:null};
+    }
+
+    async function updateAll(){
+      // market (best effort)
+      try {
+        const mm = await fetchMiniMarket();
+        setPrice("price-btc", mm.btcUSD);
+        setPrice("price-xau", mm.xauUSD);
+      } catch(e){ setPrice("price-btc", null); setPrice("price-xau", null); }
+
+      // recommended (don’t block others)
+      (async () => {
+        const listEl = $("#recommended-card .list");
+        try {
+
+        
