@@ -21,16 +21,12 @@
     }
     /* Mobile tagline BELOW the image (overlay hidden) */
     .mobile-tagline {
-      display:none;
-      padding:10px 14px 0;
-      text-align:center;
-      font-weight:600;
-      line-height:1.35;
+      display:none; padding:10px 14px 0; text-align:center; font-weight:600; line-height:1.35;
     }
 
     @media (max-width: 768px) {
       header.banner { height: 110px; }
-      .banner-text { display:none; }     /* hide overlay on mobile */
+      .banner-text { display:none; }
       .mobile-tagline { display:block; font-size:.9rem; }
     }
     @media (max-width: 480px) {
@@ -70,7 +66,6 @@
     <img class="banner-img" src="The Cerf Report.png" alt="The Cerf Report banner" />
     <div class="banner-text">More signal. Less noise — curated analysis across tech, finance, and politics.</div>
   </header>
-  <!-- Shown only on mobile via CSS above -->
   <div class="mobile-tagline">More signal. Less noise — curated analysis across tech, finance, and politics.</div>
 
   <!-- Simple Market -->
@@ -133,7 +128,7 @@
   <div class="footer" id="updatedAt"></div>
 
   <script>
-    // helpers
+    // ---------- helpers ----------
     const ABS = (path) => new URL(path, location.origin).toString();
     const $ = (sel, root=document) => root.querySelector(sel);
 
@@ -150,88 +145,15 @@
       return d.value.replace(/^<!\[CDATA\[/, "").replace(/\]\]>$/, "");
     }
 
+    // Robust JSON fetch with clear console surfacing for non-JSON responses
     async function fetchJSON(url){
       const r = await fetch(url, { redirect: "follow" });
       const text = await r.text();
-      if (!r.ok) throw new Error(`HTTP ${r.status}: ${text.slice(0,100)}`);
-      return JSON.parse(text);
-    }
-
-    function renderNewsList(listEl, articles, errText){
-      if (!Array.isArray(articles) || articles.length === 0){
-        listEl.innerHTML = `<div class="loading">${errText}</div>`;
-        return;
+      if (!r.ok) {
+        console.error(`Request failed ${url}: HTTP ${r.status}`, text.slice(0,200));
+        throw new Error(`HTTP ${r.status}`);
       }
-      listEl.innerHTML = "";
-      for (const a of articles){
-        const div = document.createElement("div");
-        div.className = "item";
-        div.innerHTML = `<a href="${a.url}" target="_blank" rel="noopener">${decodeEntities(a.title)}</a>
-                         <p>${a.description||""}</p>`;
-        listEl.appendChild(div);
-      }
-    }
-
-    function stamp(cardEl){
-      const s = cardEl.querySelector('[data-stamp]');
-      if (s) s.textContent = `Updated ${new Date().toLocaleTimeString()}`;
-    }
-
-    const sectionDefs = [
-      { id: "front-card",   section: "frontpage", label: "Front Page" },
-      { id: "tech-card",    section: "tech",      label: "Technology" },
-      { id: "world-card",   section: "world",     label: "World News" },
-      { id: "finance-card", section: "finance",   label: "Finance" }
-    ];
-
-    async function loadSection({ id, section, label }){
-      const listEl = document.querySelector(`#${id} .list`);
-      let r = await fetch(ABS("/.netlify/functions/news?section="+encodeURIComponent(section)));
-      if (!r.ok) return renderNewsList(listEl, [], `Could not load ${label}.`);
-      const data = await r.json();
-      renderNewsList(listEl, data.articles, `Could not load ${label}.`);
-      stamp(document.getElementById(id));
-    }
-
-    async function fetchCerf(){
-      const d = await fetchJSON(ABS("/.netlify/functions/substack?mode=archive"));
-      return d.articles||[];
-    }
-
-    async function fetchRecommended(){
-      const d = await fetchJSON(ABS("/.netlify/functions/get-links"));
-      return d.articles||[];
-    }
-
-    async function fetchMiniMarket(){
-      const d = await fetchJSON(ABS("/.netlify/functions/mini-market"));
-      return d.data||{btcUSD:null,xauUSD:null};
-    }
-
-    async function updateAll(){
       try {
-        const mm = await fetchMiniMarket();
-        setPrice("price-btc", mm.btcUSD);
-        setPrice("price-xau", mm.xauUSD);
-      } catch(e){ setPrice("price-btc", null); setPrice("price-xau", null); }
-
-      const [recs, cerf] = await Promise.all([
-        fetchRecommended().catch(()=>[]),
-        fetchCerf().catch(()=>[])
-      ]);
-      renderNewsList($("#recommended-card .list"), recs, "Could not load recommended.");
-      stamp($("#recommended-card"));
-      renderNewsList($("#cerf-card .list"), cerf, "Could not load The Cerf Report.");
-      stamp($("#cerf-card"));
-
-      await Promise.all(sectionDefs.map(loadSection));
-      $("#updatedAt").textContent = `Updated ${new Date().toLocaleString()}`;
-    }
-
-    document.addEventListener("DOMContentLoaded", () => {
-      updateAll();
-      setInterval(updateAll, 5*60*1000);
-    });
-  </script>
-</body>
-</html>
+        return JSON.parse(text);
+      } catch (e) {
+        console.error(`Non-JSON from ${url}:`, tex
