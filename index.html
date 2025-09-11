@@ -125,8 +125,7 @@
 
   <script>
     // ---------- CONFIG ----------
-    // If you ever open this page somewhere that's NOT your Netlify site,
-    // set NETLIFY_BASE to your site (or custom domain) so functions resolve.
+    // If you ever open this page somewhere that's NOT your Netlify site, set NETLIFY_BASE.
     // Example: const NETLIFY_BASE = "https://thecerfreport.netlify.app";
     const NETLIFY_BASE = "";
     const ABS = (path) => new URL(path, NETLIFY_BASE || location.origin).toString();
@@ -200,9 +199,33 @@
       return { btcUSD: box?.btcUSD ?? null, xauUSD: box?.xauUSD ?? null };
     }
 
+    // Fallback chain for Recommended:
+    // 1) function → 2) /recommended.json → 3) Substack archive (top 6)
     async function fetchRecommended(){
-      const d = await fetchJSON(ABS("/.netlify/functions/get-links"));
-      return pickArticles(d);
+      // 1) Netlify function
+      try {
+        const d = await fetchJSON(ABS("/.netlify/functions/get-links"));
+        const a = pickArticles(d);
+        if (a.length) return a;
+      } catch {}
+      // 2) Static JSON (create /recommended.json in your repo root when ready)
+      try {
+        const d2 = await fetchJSON(ABS("/recommended.json"));
+        const a2 = pickArticles(d2);
+        if (a2.length) return a2;
+      } catch {}
+      // 3) Substack fallback
+      try {
+        const d3 = await fetchJSON(ABS("/.netlify/functions/substack?mode=archive"));
+        const a3 = pickArticles(d3).slice(0, 6).map(x => ({
+          title: x.title || x.name || "From The Cerf Report",
+          url:   x.url   || x.link || "https://thecerfreport.substack.com/",
+          description: x.description || x.summary || ""
+        }));
+        if (a3.length) return a3;
+      } catch {}
+      // If we get here, nothing worked
+      return [];
     }
 
     async function fetchCerf(){
@@ -228,15 +251,16 @@
         .then(mm => { setPrice("price-btc", mm.btcUSD); setPrice("price-xau", mm.xauUSD); })
         .catch(() => { setPrice("price-btc", null); setPrice("price-xau", null); });
 
-      // recommended (don’t block anything else)
+      // recommended (non-blocking)
       (async () => {
         const listEl = $("#recommended-card .list");
         try {
           const recs = await fetchRecommended();
-          renderNewsList(listEl, recs, "Could not load recommended.");
+          if (recs.length === 0) throw new Error("no data");
+          renderNewsList(listEl, recs, "Could not load Recommended Reading.");
           stamp($("#recommended-card"));
         } catch {
-          renderNewsList(listEl, [], "Could not load recommended.");
+          renderNewsList(listEl, [], "Could not load Recommended Reading.");
         }
       })();
 
