@@ -124,12 +124,15 @@
   <div class="footer" id="updatedAt"></div>
 
   <script>
-    // -------- OPTIONAL: force your Netlify base (leave "" to use current origin)
-    // const NETLIFY_BASE = "https://<your-site>.netlify.app";
+    // ---------- CONFIG ----------
+    // If you ever open this page somewhere that's NOT your Netlify site,
+    // set NETLIFY_BASE to your site (or custom domain) so functions resolve.
+    // Example: const NETLIFY_BASE = "https://thecerfreport.netlify.app";
     const NETLIFY_BASE = "";
     const ABS = (path) => new URL(path, NETLIFY_BASE || location.origin).toString();
     const $ = (sel, root=document) => root.querySelector(sel);
 
+    // ---------- helpers ----------
     function setPrice(elId, value){
       const el = document.querySelector(`#${elId} .price`);
       el.textContent = (value == null)
@@ -146,9 +149,20 @@
     async function fetchJSON(url){
       const r = await fetch(url, { redirect: "follow" });
       const text = await r.text();
-      if (!r.ok) throw new Error(`HTTP ${r.status}: ${text.slice(0,120)}`);
-      return JSON.parse(text);
+      if (!r.ok) throw new Error(`HTTP ${r.status} ${url}: ${text.slice(0,120)}`);
+      try { return JSON.parse(text); }
+      catch { throw new Error(`Non-JSON from ${url}: ${text.slice(0,120)}`); }
     }
+
+    // Accept raw arrays and various keys ({articles},{items},{data})
+    const pickArticles = (d) => {
+      if (!d) return [];
+      if (Array.isArray(d)) return d;
+      if (Array.isArray(d.articles)) return d.articles;
+      if (Array.isArray(d.items)) return d.items;
+      if (Array.isArray(d.data)) return d.data;
+      return [];
+    };
 
     function renderNewsList(listEl, articles, errText){
       if (!Array.isArray(articles) || articles.length === 0){
@@ -157,10 +171,12 @@
       }
       listEl.innerHTML = "";
       for (const a of articles){
+        const url = a.url || a.link || "#";
+        const title = decodeEntities(a.title || a.name || "(untitled)");
+        const desc = a.description || a.summary || "";
         const div = document.createElement("div");
         div.className = "item";
-        div.innerHTML = `<a href="${a.url}" target="_blank" rel="noopener">${decodeEntities(a.title)}</a>
-                         <p>${a.description||""}</p>`;
+        div.innerHTML = `<a href="${url}" target="_blank" rel="noopener">${title}</a><p>${desc}</p>`;
         listEl.appendChild(div);
       }
     }
@@ -177,59 +193,79 @@
       { id: "finance-card", section: "finance",   label: "Finance" }
     ];
 
+    // ---------- data fetchers ----------
+    async function fetchMiniMarket(){
+      const d = await fetchJSON(ABS("/.netlify/functions/mini-market"));
+      const box = d?.data ?? d; // tolerate {data:{...}} or plain object
+      return { btcUSD: box?.btcUSD ?? null, xauUSD: box?.xauUSD ?? null };
+    }
+
+    async function fetchRecommended(){
+      const d = await fetchJSON(ABS("/.netlify/functions/get-links"));
+      return pickArticles(d);
+    }
+
+    async function fetchCerf(){
+      const d = await fetchJSON(ABS("/.netlify/functions/substack?mode=archive"));
+      return pickArticles(d);
+    }
+
     async function loadSection({ id, section, label }){
       const listEl = document.querySelector(`#${id} .list`);
       try {
-        const r = await fetch(ABS("/.netlify/functions/news?section="+encodeURIComponent(section)));
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const data = await r.json();
-        renderNewsList(listEl, data.articles, `Could not load ${label}.`);
+        const d = await fetchJSON(ABS("/.netlify/functions/news?section="+encodeURIComponent(section)));
+        renderNewsList(listEl, pickArticles(d), `Could not load ${label}.`);
         stamp(document.getElementById(id));
       } catch (e) {
         renderNewsList(listEl, [], `Could not load ${label}.`);
       }
     }
 
-    async function fetchCerf(){
-      const d = await fetchJSON(ABS("/.netlify/functions/substack?mode=archive"));
-      return d.articles||[];
-    }
-
-    // --- Only change to Recommended: tiny retry + timeout guard ---
-    function withTimeout(promise, ms = 3500) {
-      return Promise.race([
-        promise,
-        new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), ms))
-      ]);
-    }
-    async function fetchRecommended(){
-      // first try (short)
-      try {
-        const d = await withTimeout(fetchJSON(ABS("/.netlify/functions/get-links")), 3500);
-        return d.articles || [];
-      } catch {
-        // second try (a bit longer)
-        const d2 = await withTimeout(fetchJSON(ABS("/.netlify/functions/get-links")), 6000);
-        return d2.articles || [];
-      }
-    }
-
-    async function fetchMiniMarket(){
-      const d = await fetchJSON(ABS("/.netlify/functions/mini-market"));
-      return d.data||{btcUSD:null,xauUSD:null};
-    }
-
+    // ---------- orchestrator ----------
     async function updateAll(){
-      // market (best effort)
-      try {
-        const mm = await fetchMiniMarket();
-        setPrice("price-btc", mm.btcUSD);
-        setPrice("price-xau", mm.xauUSD);
-      } catch(e){ setPrice("price-btc", null); setPrice("price-xau", null); }
+      // mini market (best-effort)
+      fetchMiniMarket()
+        .then(mm => { setPrice("price-btc", mm.btcUSD); setPrice("price-xau", mm.xauUSD); })
+        .catch(() => { setPrice("price-btc", null); setPrice("price-xau", null); });
 
-      // recommended (don’t block others)
+      // recommended (don’t block anything else)
       (async () => {
         const listEl = $("#recommended-card .list");
         try {
+          const recs = await fetchRecommended();
+          renderNewsList(listEl, recs, "Could not load recommended.");
+          stamp($("#recommended-card"));
+        } catch {
+          renderNewsList(listEl, [], "Could not load recommended.");
+        }
+      })();
 
-        
+      // others in parallel
+      const cerfP = fetchCerf().catch(()=>[]);
+      const sectionsP = Promise.all(sectionDefs.map(loadSection));
+
+      const cerf = await cerfP;
+      renderNewsList($("#cerf-card .list"), cerf, "Could not load The Cerf Report.");
+      stamp($("#cerf-card"));
+
+      await sectionsP;
+      $("#updatedAt").textContent = `Updated ${new Date().toLocaleString()}`;
+
+      // safety: after 6s, flip any remaining "Loading…" to a friendly message
+      setTimeout(() => {
+        document.querySelectorAll('.card .list').forEach(list => {
+          if (list && /Loading…/.test(list.textContent || "")) {
+            const cardTitle = list.closest('.card')?.querySelector('h2')?.textContent || "Section";
+            list.innerHTML = `<div class="loading">Could not load ${cardTitle}.</div>`;
+          }
+        });
+      }, 6000);
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+      updateAll();
+      setInterval(updateAll, 5*60*1000);
+    });
+  </script>
+</body>
+</html>
