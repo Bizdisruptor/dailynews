@@ -122,7 +122,9 @@
     .item p{margin:6px 0 0;color:var(--muted);font-size:.92rem;line-height:1.35}
     .loading{text-align:center;padding:14px;color:var(--muted);line-height:1.4;}
     .smallnote{margin-top:8px;color:#8a8f98;font-size:.8rem}
-    .footer{margin:16px auto 0;text-align:center;color:#8a8f98;font-size:.85rem;max-width:1400px}
+    .footer{margin:24px auto 0;text-align:center;color:#606770;font-size:.95rem;max-width:1400px;padding:20px 18px 28px;background:var(--paper);border-radius:12px;box-shadow:0 2px 6px rgba(0,0,0,.08)}
+    .footer a{color:var(--blue);text-decoration:none;font-weight:600}
+    .footer a:hover{text-decoration:underline}
     
     /* Hide noscript content when JS is enabled */
     .seo-content { display: none; }
@@ -220,11 +222,13 @@
   </noscript>
 
   <footer class="footer">
-    <div id="updatedAt"></div>
-    <div style="margin-top:8px;">
-      © 2026 David Cerf — 
-      <a href="https://thecerfreport.substack.com/" target="_blank" rel="noopener">Substack</a> · 
-      <a href="https://x.com/TheCerfReport" target="_blank" rel="noopener">X</a> · 
+    <div id="updatedAt" style="margin-bottom:10px;"></div>
+    <div>
+      © 2026 David Cerf
+    </div>
+    <div style="margin-top:12px;display:flex;justify-content:center;gap:20px;flex-wrap:wrap;">
+      <a href="https://thecerfreport.substack.com/" target="_blank" rel="noopener">Substack</a>
+      <a href="https://x.com/TheCerfReport" target="_blank" rel="noopener">X</a>
       <a href="https://bsky.app/profile/thecerfreport.bsky.social" target="_blank" rel="noopener">Bluesky</a>
     </div>
   </footer>
