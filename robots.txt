@@ -1,0 +1,6 @@
+# robots.txt for TheCerfReport.com
+User-agent: *
+Allow: /
+
+# Sitemap location
+Sitemap: https://thecerfreport.com/sitemap.xml

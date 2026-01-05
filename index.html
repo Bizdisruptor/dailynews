@@ -3,7 +3,66 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>The Cerf Report — Curated News</title>
+  <title>The Cerf Report — Curated News & Analysis</title>
+  
+  <!-- SEO Meta Tags -->
+  <meta name="description" content="More signal. Less noise. The Cerf Report delivers curated analysis across technology, finance, politics, and world news. Subscribe for insights that cut through the noise.">
+  <meta name="keywords" content="news, analysis, technology, finance, politics, world news, curated news, The Cerf Report, David Cerf">
+  <meta name="author" content="David Cerf">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://thecerfreport.com/">
+  
+  <!-- Open Graph / Facebook -->
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://thecerfreport.com/">
+  <meta property="og:title" content="The Cerf Report — Curated News & Analysis">
+  <meta property="og:description" content="More signal. Less noise. Curated analysis across technology, finance, politics, and world news.">
+  <meta property="og:image" content="https://thecerfreport.com/The Cerf Report.png">
+  <meta property="og:site_name" content="The Cerf Report">
+  
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:site" content="@TheCerfReport">
+  <meta name="twitter:creator" content="@TheCerfReport">
+  <meta name="twitter:url" content="https://thecerfreport.com/">
+  <meta name="twitter:title" content="The Cerf Report — Curated News & Analysis">
+  <meta name="twitter:description" content="More signal. Less noise. Curated analysis across technology, finance, politics, and world news.">
+  <meta name="twitter:image" content="https://thecerfreport.com/The Cerf Report.png">
+  
+  <!-- Structured Data for Google -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "name": "The Cerf Report",
+    "url": "https://thecerfreport.com",
+    "description": "More signal. Less noise. Curated analysis across technology, finance, politics, and world news.",
+    "author": {
+      "@type": "Person",
+      "name": "David Cerf",
+      "url": "https://thecerfreport.substack.com/",
+      "sameAs": [
+        "https://x.com/TheCerfReport",
+        "https://bsky.app/profile/thecerfreport.bsky.social",
+        "https://thecerfreport.substack.com/"
+      ]
+    },
+    "publisher": {
+      "@type": "Organization",
+      "name": "The Cerf Report",
+      "logo": {
+        "@type": "ImageObject",
+        "url": "https://thecerfreport.com/The Cerf Report.png"
+      },
+      "sameAs": [
+        "https://x.com/TheCerfReport",
+        "https://bsky.app/profile/thecerfreport.bsky.social",
+        "https://thecerfreport.substack.com/"
+      ]
+    }
+  }
+  </script>
+  
   <style>
     :root { --blue:#0056b3; --ink:#1c1e21; --muted:#606770; --paper:#fff; --bg:#f0f2f5; --positive:#17823b; --negative:#b00020; }
     * { box-sizing:border-box; }
@@ -55,14 +114,21 @@
     .loading{text-align:center;padding:14px;color:var(--muted);line-height:1.4;}
     .smallnote{margin-top:8px;color:#8a8f98;font-size:.8rem}
     .footer{margin:16px auto 0;text-align:center;color:#8a8f98;font-size:.85rem;max-width:1400px}
+    
+    /* Hide noscript content when JS is enabled */
+    .seo-content { display: none; }
+    noscript .seo-content { display: block; padding: 20px; max-width: 1400px; margin: 0 auto; }
   </style>
 </head>
 <body>
   <header class="banner">
-    <img class="banner-img" src="The Cerf Report.png" alt="The Cerf Report banner" />
+    <img class="banner-img" src="The Cerf Report.png" alt="The Cerf Report banner - Curated news and analysis across technology, finance, and politics" />
     <div class="banner-text">More signal. Less noise — curated analysis across tech, finance, and politics.</div>
   </header>
   <div class="mobile-tagline">More signal. Less noise — curated analysis across tech, finance, and politics.</div>
+
+  <!-- Accessible H1 for SEO (visually hidden but readable by search engines) -->
+  <h1 style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden;">The Cerf Report — Curated News and Analysis</h1>
 
   <!-- Simple Market -->
   <div class="market">
@@ -78,50 +144,81 @@
     </div>
   </div>
 
-  <div class="grid">
-    <div class="card" id="recommended-card">
-      <h2>Recommended Reading</h2>
-      <div class="list"><div class="loading">Loading…</div></div>
-      <div class="smallnote" data-stamp></div>
-    </div>
-
-    <div class="card" id="cerf-card">
-      <h2>Subscribe to my Substack, click below</h2>
-      <div class="section-link">
-        <a href="https://thecerfreport.substack.com/" target="_blank" rel="noopener noreferrer">
-          TheCerfReport.Substack.com →
-        </a>
+  <main>
+    <div class="grid">
+      <div class="card" id="recommended-card">
+        <h2>Recommended Reading</h2>
+        <div class="list"><div class="loading">Loading…</div></div>
+        <div class="smallnote" data-stamp></div>
       </div>
-      <div class="list"><div class="loading">Loading…</div></div>
-      <div class="smallnote" data-stamp></div>
-    </div>
 
-    <div class="card" id="front-card">
-      <h2>Front Page</h2>
-      <div class="list"><div class="loading">Loading…</div></div>
-      <div class="smallnote" data-stamp></div>
-    </div>
+      <div class="card" id="cerf-card">
+        <h2>Subscribe to my Substack, click below</h2>
+        <div class="section-link">
+          <a href="https://thecerfreport.substack.com/" target="_blank" rel="noopener noreferrer">
+            TheCerfReport.Substack.com →
+          </a>
+        </div>
+        <div class="list"><div class="loading">Loading…</div></div>
+        <div class="smallnote" data-stamp></div>
+      </div>
 
-    <div class="card" id="tech-card">
-      <h2>Technology</h2>
-      <div class="list"><div class="loading">Loading…</div></div>
-      <div class="smallnote" data-stamp></div>
-    </div>
+      <div class="card" id="front-card">
+        <h2>Front Page</h2>
+        <div class="list"><div class="loading">Loading…</div></div>
+        <div class="smallnote" data-stamp></div>
+      </div>
 
-    <div class="card" id="world-card">
-      <h2>World News</h2>
-      <div class="list"><div class="loading">Loading…</div></div>
-      <div class="smallnote" data-stamp></div>
-    </div>
+      <div class="card" id="tech-card">
+        <h2>Technology</h2>
+        <div class="list"><div class="loading">Loading…</div></div>
+        <div class="smallnote" data-stamp></div>
+      </div>
 
-    <div class="card" id="finance-card">
-      <h2>Finance</h2>
-      <div class="list"><div class="loading">Loading…</div></div>
-      <div class="smallnote" data-stamp></div>
-    </div>
-  </div>
+      <div class="card" id="world-card">
+        <h2>World News</h2>
+        <div class="list"><div class="loading">Loading…</div></div>
+        <div class="smallnote" data-stamp></div>
+      </div>
 
-  <div class="footer" id="updatedAt"></div>
+      <div class="card" id="finance-card">
+        <h2>Finance</h2>
+        <div class="list"><div class="loading">Loading…</div></div>
+        <div class="smallnote" data-stamp></div>
+      </div>
+    </div>
+  </main>
+
+  <!-- SEO fallback content for search engines that don't execute JavaScript -->
+  <noscript>
+    <div class="seo-content">
+      <h2>About The Cerf Report</h2>
+      <p>The Cerf Report is your source for curated news and analysis. We cut through the noise to deliver what matters across technology, finance, politics, and world events.</p>
+      
+      <h3>What We Cover</h3>
+      <ul>
+        <li><strong>Technology News</strong> — The latest developments in tech, AI, and innovation</li>
+        <li><strong>Finance</strong> — Market analysis, cryptocurrency updates, and economic insights</li>
+        <li><strong>World News</strong> — Important global events and geopolitical analysis</li>
+        <li><strong>Front Page</strong> — Today's most significant stories curated for you</li>
+      </ul>
+      
+      <h3>Subscribe</h3>
+      <p>Get deeper analysis and exclusive content by subscribing to <a href="https://thecerfreport.substack.com/">The Cerf Report on Substack</a>.</p>
+      
+      <p><em>Enable JavaScript to see live news feeds and real-time market data.</em></p>
+    </div>
+  </noscript>
+
+  <footer class="footer">
+    <div id="updatedAt"></div>
+    <div style="margin-top:8px;">
+      © 2026 David Cerf — 
+      <a href="https://thecerfreport.substack.com/" target="_blank" rel="noopener">Substack</a> · 
+      <a href="https://x.com/TheCerfReport" target="_blank" rel="noopener">X</a> · 
+      <a href="https://bsky.app/profile/thecerfreport.bsky.social" target="_blank" rel="noopener">Bluesky</a>
+    </div>
+  </footer>
 
   <script>
     // ---------- CONFIG ----------
