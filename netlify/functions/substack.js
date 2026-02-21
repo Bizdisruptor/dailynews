@@ -3,6 +3,7 @@
 // Always provide a usable `title` (fallbacks if missing).
 
 const DEFAULT_FEED = "https://thecerfreport.substack.com/feed";
+const PODCAST_FEED = "https://api.substack.com/feed/podcast/4256397.rss";
 
 const ENT = { "&lt;":"<", "&gt;":">", "&amp;":"&", "&quot;":'"', "&#39;":"'" };
 const unescapeHtml = (s="") => s.replace(/(&lt;|&gt;|&amp;|&quot;|&#39;)/g, m => ENT[m] || m);
@@ -91,17 +92,32 @@ async function tryArchiveJSON(pubHost){
 
 export async function handler(event){
   try{
-    const feed = event.queryStringParameters?.feed || DEFAULT_FEED;
-    const pubHost = new URL(feed).host;
-    // ✅ FIX: This logic checks for "mode=archive" and skips the failing RSS step.
     const mode = (event.queryStringParameters?.mode || 'auto').toLowerCase();
-
+    
     let articles = [];
-    try {
-      if (mode === 'archive') throw new Error('skip rss'); // Force archive path
-      articles = await tryRSS(feed);
-    } catch {
-      articles = await tryArchiveJSON(pubHost);
+    
+    // Handle podcast mode separately
+    if (mode === 'podcast') {
+      try {
+        articles = await tryRSS(PODCAST_FEED);
+        // Limit to 5 most recent episodes
+        articles = articles.slice(0, 5);
+      } catch (e) {
+        console.error('Podcast RSS failed:', e);
+        // If podcast RSS fails, return empty array rather than falling back
+        articles = [];
+      }
+    } else {
+      // Original logic for regular feed
+      const feed = event.queryStringParameters?.feed || DEFAULT_FEED;
+      const pubHost = new URL(feed).host;
+      
+      try {
+        if (mode === 'archive') throw new Error('skip rss'); // Force archive path
+        articles = await tryRSS(feed);
+      } catch {
+        articles = await tryArchiveJSON(pubHost);
+      }
     }
 
     return {
@@ -117,4 +133,3 @@ export async function handler(event){
     };
   }
 }
-
