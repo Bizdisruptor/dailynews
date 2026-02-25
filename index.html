@@ -367,6 +367,10 @@
         <a href="https://www.google.com/finance/quote/XAU-USD" target="_blank" rel="noopener">Gold (XAU)</a>
         <span class="price">—</span>
       </div>
+      <div class="chip" id="election-countdown">
+        <span>Days to next presidential election</span>
+        <span class="price" id="days-remaining">—</span>
+      </div>
     </div>
   </div>
 
@@ -484,6 +488,21 @@
       el.textContent = (value == null)
         ? "—"
         : Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function updateElectionCountdown(){
+      // Next presidential election: November 5, 2028
+      const electionDate = new Date('2028-11-05T00:00:00-05:00'); // Eastern Time
+      const now = new Date();
+      const diffTime = electionDate - now;
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      
+      const el = document.getElementById('days-remaining');
+      if (diffDays > 0) {
+        el.textContent = diffDays.toLocaleString();
+      } else {
+        el.textContent = '0';
+      }
     }
 
     function decodeEntities(str=""){
@@ -630,6 +649,9 @@
       fetchMiniMarket()
         .then(mm => { setPrice("price-btc", mm.btcUSD); setPrice("price-xau", mm.xauUSD); })
         .catch(() => { setPrice("price-btc", null); setPrice("price-xau", null); });
+
+      // election countdown
+      updateElectionCountdown();
 
       // recommended (non-blocking)
       (async () => {
