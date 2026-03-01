@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>About — The Cerf Report</title>
+
+  <meta name="description" content="About The Cerf Report — independent analysis across technology, economics, geopolitics, and AI.">
+  <link rel="canonical" href="https://thecerfreport.com/about/">
+
+  <!-- JSON-LD: entity + distribution -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "Organization",
+        "@id": "https://thecerfreport.com/#org",
+        "name": "The Cerf Report",
+        "url": "https://thecerfreport.com/",
+        "sameAs": [
+          "https://thecerfreport.substack.com/",
+          "https://x.com/TheCerfReport",
+          "https://bsky.app/profile/thecerfreport.bsky.social"
+        ]
+      },
+      {
+        "@type": "PodcastSeries",
+        "@id": "https://thecerfreport.com/#podcast",
+        "name": "The Cerf Report",
+        "url": "https://thecerfreport.com/",
+        "sameAs": [
+          "https://podcasts.apple.com/us/podcast/the-cerf-report/id1837946735",
+          "https://open.spotify.com/show/0fZLvBdnAtQrzPmSao0hBY"
+        ],
+        "publisher": { "@id": "https://thecerfreport.com/#org" }
+      },
+      {
+        "@type": "WebPage",
+        "@id": "https://thecerfreport.com/about/#webpage",
+        "url": "https://thecerfreport.com/about/",
+        "name": "About — The Cerf Report",
+        "isPartOf": {
+          "@type": "WebSite",
+          "@id": "https://thecerfreport.com/#website",
+          "url": "https://thecerfreport.com/",
+          "name": "The Cerf Report",
+          "publisher": { "@id": "https://thecerfreport.com/#org" }
+        }
+      }
+    ]
+  }
+  </script>
+
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      line-height: 1.65;
+      max-width: 840px;
+      margin: 40px auto;
+      padding: 0 20px;
+      color: #111;
+    }
+    h1 { margin-bottom: 0.35em; }
+    .subtitle { color: #666; margin-bottom: 1.75em; }
+    .links a { display: inline-block; margin: 6px 10px 6px 0; }
+    .section { margin-top: 28px; }
+  </style>
+</head>
+<body>
+
+<h1>About The Cerf Report</h1>
+<p class="subtitle">More signal. Less noise.</p>
+
+<p>
+<strong>The Cerf Report</strong> is an independent publication and podcast focused on clear,
+evidence-driven analysis across technology, economics, geopolitics, and AI.
+The goal is to cut through narrative noise and explain the structural forces shaping
+markets and power.
+</p>
+
+<div class="section">
+  <h2>Follow & Listen</h2>
+  <p class="links">
+    <a href="https://thecerfreport.substack.com/">Substack</a>
+    <a href="https://x.com/TheCerfReport">X</a>
+    <a href="https://bsky.app/profile/thecerfreport.bsky.social">Bluesky</a>
+    <a href="https://podcasts.apple.com/us/podcast/the-cerf-report/id1837946735">Apple Podcasts</a>
+    <a href="https://open.spotify.com/show/0fZLvBdnAtQrzPmSao0hBY">Spotify</a>
+  </p>
+</div>
+
+<div class="section">
+  <h2>Editorial Focus</h2>
+  <ul>
+    <li>AI infrastructure and the compute economy</li>
+    <li>Trade, tariffs, and industrial policy</li>
+    <li>Technology platform power and market structure</li>
+    <li>Second-order effects in geopolitics and markets</li>
+  </ul>
+</div>
+
+</body>
+</html>
